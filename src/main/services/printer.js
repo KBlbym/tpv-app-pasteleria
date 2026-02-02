@@ -1,7 +1,9 @@
 import escpos from 'escpos';
 import USB from 'escpos-usb';
+import { getSettings } from './database.js';
 
 export function printTicket(saleData) {
+  const settings = getSettings(); // Recuperamos los datos de la empresa
   try {
     const device = new USB(); // Detecta la impresora USB automáticamente
     const printer = new escpos.Printer(device);
@@ -13,35 +15,39 @@ export function printTicket(saleData) {
       }
 
       printer
-        .font('a')
-        .align('ct')
-        .style('bu')
-        .size(1, 1)
-        .text('PASTELERÍA DULCE')
-        .size(0, 0)
-        .text('Calle Mayor, 12 - Madrid')
-        .text('--------------------------------')
-        .align('lt')
-        .text(`Fecha: ${new Date().toLocaleString()}`)
-        .text(`Ticket #: ${saleData.saleId}`)
-        .text('--------------------------------');
+    .align('ct')
+    .style('b')
+    .size(2, 2)
+    .text(settings.business_name) // NOMBRE EN GRANDE
+    .size(1, 1)
+    .style('normal')
+    .text(`NIF: ${settings.business_nif}`)
+    .text(settings.business_address)
+    .text(`Tel: ${settings.business_phone}`)
+    .text('--------------------------------')
+    .text(`Ticket: ${saleData.saleId}`)
+    .text(new Date().toLocaleString())
+    .text('--------------------------------')
+    .align('lt');
 
-      saleData.cart.forEach(item => {
-        printer.tableCustom([
-          { text: `${item.qty}x ${item.name}`, align: "LEFT", width: 0.75 },
-          { text: `${(item.price * item.qty).toFixed(2)}`, align: "RIGHT", width: 0.25 }
-        ]);
-      });
+  // Bucle de productos
+  saleData.cart.forEach(item => {
+    printer.text(`${item.qty} x ${item.name.padEnd(20)} ${ (item.qty * item.price).toFixed(2) }€`);
+  });
 
       printer
-        .text('--------------------------------')
-        .align('rt')
-        .size(1, 1)
-        .text(`TOTAL: ${saleData.total.toFixed(2)} EUR`)
-        .size(0, 0)
-        .feed(2)
-        .cut() // Comando para la cuchilla de la CP-450
-        .close();
+    .text('--------------------------------')
+    .align('rt')
+    .style('b')
+    .size(2, 2)
+    .text(`TOTAL: ${saleData.total.toFixed(2)}€`)
+    .size(1, 1)
+    .style('normal')
+    .align('ct')
+    .feed(2)
+    .text(settings.ticket_footer)
+    .cut()
+    .close();
     });
   } catch (err) {
     console.error("No se encontró la impresora:", err);

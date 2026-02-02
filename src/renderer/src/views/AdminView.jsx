@@ -1,57 +1,89 @@
 import { useState, useEffect } from 'react';
+// 1. Importamos los trozos (componentes) que creamos antes
+import DashboardSection from '../components/DashboardSection';
+import InventorySection from '../components/InventorySection';
+import BusinessSection from '../components/BusinessSection';
+import HistorySection from '../components/HistorySection'; 
 
 export default function AdminView() {
+  const [activeTab, setActiveTab] = useState('resumen');
+  
+  // Estados para los datos que vienen de la DB
+  const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [settings, setSettings] = useState({});
   const [dailyTotal, setDailyTotal] = useState(0);
-  const [newProduct, setNewProduct] = useState({ name: "", price: "", category: "Pastelería" });
 
-useEffect(() => {
-  const fetchTotal = async () => {
-    try {
-      if (window.electronAPI?.getDailySales) {
-        const total = await window.electronAPI.getDailySales();
-        setDailyTotal(total);
-      }
-    } catch (err) {
-      console.error("Error al obtener ventas diarias:", err);
-    }
+  // 2. Función para cargar TODO de golpe desde la base de datos
+  const loadAllData = async () => {
+    const p = await window.electronAPI.getProductsWithCategory();
+    const c = await window.electronAPI.getCategories();
+    const s = await window.electronAPI.getSettings();
+    const t = await window.electronAPI.getDailySales();
+    
+    setProducts(p || []);
+    setCategories(c || []);
+    setSettings(s || {});
+    setDailyTotal(t || 0);
   };
-  fetchTotal();
-}, []);
 
-  const saveProduct = async () => {
-    if (!newProduct.name || !newProduct.price) return alert("Faltan datos");
-    await window.electronAPI.addProduct(newProduct);
-    alert("Producto añadido!");
-    setNewProduct({ name: "", price: "", category: "Pastelería" });
+  useEffect(() => {
+    loadAllData();
+  }, []);
+
+  // 3. Renderizado condicional mejorado
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'resumen': 
+        return <DashboardSection dailyTotal={dailyTotal} productCount={products.length} />;
+      case 'inventario': 
+        return <InventorySection products={products} categories={categories} onRefresh={loadAllData} />;
+      case 'empresa': 
+        return <BusinessSection settings={settings} onSave={async (newS) => {
+          await window.electronAPI.updateSettings(newS);
+          loadAllData();
+        }} />;
+      case 'reportes': 
+        return <HistorySection />; // Necesitarás crear este archivo también
+      default: 
+        return <DashboardSection dailyTotal={dailyTotal} productCount={products.length} />;
+    }
   };
 
   return (
-    <div className="p-10 max-w-5xl mx-auto space-y-10">
-      <header className="flex justify-between items-center">
-        <div>
-          <h2 className="text-3xl font-black text-slate-800">Panel de Control</h2>
-          <p className="text-slate-500 font-medium">Gestiona tus productos y ventas</p>
+    <div className="flex h-full bg-slate-50">
+      <aside className="w-64 bg-white border-r border-slate-200 flex flex-col p-6 gap-2 shadow-sm">
+        <div className="mb-8 px-2 text-2xl font-black text-slate-800">
+          Admin<span className="text-orange-500">Panel</span>
         </div>
-        <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 text-right">
-          <span className="text-xs font-bold text-slate-400 uppercase block">Caja de Hoy</span>
-          <span className="text-4xl font-black text-green-600">{dailyTotal.toFixed(2)}€</span>
-        </div>
-      </header>
+        
+        <TabButton icon="📊" label="Resumen" id="resumen" active={activeTab} set={setActiveTab} />
+        <TabButton icon="🥐" label="Inventario" id="inventario" active={activeTab} set={setActiveTab} />
+        <TabButton icon="🏢" label="Mi Empresa" id="empresa" active={activeTab} set={setActiveTab} />
+        <TabButton icon="📈" label="Historial" id="reportes" active={activeTab} set={setActiveTab} />
+      </aside>
 
-      <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200">
-        <h3 className="text-xl font-bold mb-6">Nuevo Producto</h3>
-        <div className="flex gap-4">
-          <input 
-            type="text" placeholder="Nombre" className="flex-1 p-4 bg-slate-50 rounded-2xl ring-1 ring-slate-100"
-            value={newProduct.name} onChange={e => setNewProduct({...newProduct, name: e.target.value})}
-          />
-          <input 
-            type="number" placeholder="Precio" className="w-32 p-4 bg-slate-50 rounded-2xl ring-1 ring-slate-100"
-            value={newProduct.price} onChange={e => setNewProduct({...newProduct, price: parseFloat(e.target.value)})}
-          />
-          <button onClick={saveProduct} className="bg-slate-800 text-white px-8 rounded-2xl font-bold hover:bg-orange-500 transition-colors">Añadir</button>
+      <main className="flex-1 overflow-y-auto p-10 bg-slate-50/50">
+        <div className="max-w-5xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+          {renderContent()}
         </div>
-      </div>
+      </main>
     </div>
+  );
+}
+
+function TabButton({ icon, label, id, active, set }) {
+  const isActive = active === id;
+  return (
+    <button
+      onClick={() => set(id)}
+      className={`flex items-center gap-3 px-4 py-3 rounded-2xl font-bold transition-all ${
+        isActive 
+        ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' 
+        : 'text-slate-500 hover:bg-slate-100'
+      }`}
+    >
+      <span className="text-xl">{icon}</span> {label}
+    </button>
   );
 }

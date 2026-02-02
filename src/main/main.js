@@ -2,7 +2,10 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import isDev from 'electron-is-dev';
 import { fileURLToPath } from 'url';
-import { initDB, getProducts , saveSale, getDailySales, addProduct} from './services/database.js';
+import { initDB, getProducts, saveSale, getDailySales, addProduct, getCategories, getProductsWithCategory ,
+   getSettings, updateSettings, updateProductPrice, getActiveProductsWithCategory, toggleProductStatus,
+   getAllSales, getSaleItems, getTopProducts, getSalesByHour, getSalesByRange, getDailySalesChart
+  } from './services/database.js';
 import { printTicket } from './services/printer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -51,19 +54,35 @@ ipcMain.handle('db:get-products', async () => {
   return getProducts();
 });
 
-// 2. Guardar venta e imprimir
-ipcMain.handle('db:save-sale', async (event, saleData) => {
-  try {
-    const saleId = saveSale(saleData.cart, saleData.total);
-    
-    // Lanzamos la impresión (no bloqueante)
-    printTicket({ ...saleData, saleId });
+//Obtener lista de productos activos
+ipcMain.handle('db:get-active-products', async () => {
+  return getActiveProductsWithCategory();
+});
 
-    return { success: true, saleId };
-  } catch (error) {
-    console.error("Error al vender:", error);
-    return { success: false, error: error.message };
+// 2. Guardar venta e imprimir
+// src/main/main.js
+ipcMain.handle('db:save-sale', async (event, saleData) => {
+  let savedId = null;
+
+  try {
+    // 1. Guardar en DB (Esto ya funciona por lo que veo en tus logs)
+    const result = await saveSale(saleData);
+    savedId = result.id;
+    console.log("Venta guardada con ID:", savedId);
+  } catch (dbError) {
+    console.error("Error en DB:", dbError);
+    return { success: false, error: "Error al guardar en base de datos" };
   }
+
+  // 2. Intento de impresión (Si falla, no pasa nada, seguimos adelante)
+  try {
+    await printTicket(saleData);
+  } catch (printError) {
+    console.log("Impresora no detectada (Modo simulación)");
+  }
+
+  // 3. RETORNO FINAL: Siempre devolvemos éxito si la DB funcionó
+  return { success: true, id: savedId };
 });
 
 // 3. Obtener total de ventas de hoy (Fase 2)
@@ -85,6 +104,15 @@ ipcMain.handle('db:add-product', async (event, product) => {
     throw error;
   }
 });
+// Nuevo manejador para actualizar el precio de un producto
+ipcMain.handle('db:update-product-price', async (event, { name, price }) => {
+  return updateProductPrice(name, price);
+});
+
+//Cambiar el estado activo/inactivo de un producto
+ipcMain.handle('db:toggle-product', async (event, { id, status }) => {
+  return toggleProductStatus(id, status);
+});
 
 // 5. Test de impresora
 ipcMain.handle('print:test', async () => {
@@ -99,4 +127,77 @@ ipcMain.handle('print:test', async () => {
   } catch (error) {
     return { success: false, error: error.message };
   }
+});
+// 6. Manejador para obtener categorías (para el selector del formulario)
+ipcMain.handle('db:get-categories', async () => {
+  try {
+    return getCategories();
+  } catch (error) {
+    console.error("Error al obtener categorías:", error);
+    return [];
+  }
+});
+
+// 7. Manejador para obtener productos con el nombre de su categoría (para la tabla)
+ipcMain.handle('db:get-products-with-category', async () => {
+  try {
+    return getProductsWithCategory();
+  } catch (error) {
+    console.error("Error al obtener productos con categoría:", error);
+    return [];
+  }
+});
+
+// 8. Manejador para obtener la configuración
+ipcMain.handle('db:get-settings', async () => {
+  return getSettings();
+});
+// 9. Manejador para actualizar la configuración
+ipcMain.handle('db:update-settings', async (event, settings) => {
+  try {
+    return updateSettings(settings);
+  } catch (error) {
+    console.error("Error al actualizar settings:", error);
+    return { success: false, error };
+  }
+});
+
+//======================================//
+//####### Historial de ventas #########//
+//======================================//
+
+// Obtener todas las ventas
+ipcMain.handle('db:get-all-sales', async () => getAllSales());
+
+// Obtener los items de una venta específica
+ipcMain.handle('db:get-sale-items', async (event, saleId) => {
+  try {
+    console.log("Buscando items para la venta ID:", saleId); // Para debugear
+    if (!saleId) throw new Error("ID de venta no proporcionado");
+    return getSaleItems(saleId);
+  } catch (error) {
+    console.error("Error en get-sale-items:", error);
+    throw error;
+  }
+});
+
+//Obtener estadísticas
+ipcMain.handle('db:get-stats', async (event, limit) => {
+  const hourlyData = getSalesByHour(); // Obtenemos el array de 24 horas
+  // Buscamos la hora con más tickets para la tarjeta principal
+  const busyHour = [...hourlyData].sort((a, b) => b.count - a.count)[0];
+  return {
+    topProducts: getTopProducts(limit),
+    busyHour: busyHour,
+    hourlyData: hourlyData // ESTO ES LO QUE LEE EL GRÁFICO
+  };
+});
+
+// Obtener ventas en un rango de fechas
+ipcMain.handle('db:get-sales-range', async (event, { start, end }) => {
+  return getSalesByRange(start, end);
+});
+
+ipcMain.handle('db:get-chart-data', async (event, { start, end }) => {
+  return getDailySalesChart(start, end);
 });
