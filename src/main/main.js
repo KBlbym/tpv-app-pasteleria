@@ -1,25 +1,45 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, protocol, ipcMain, net, BrowserWindow } from 'electron';
 import path from 'path';
+import fs from 'fs';
 import isDev from 'electron-is-dev';
 import { fileURLToPath } from 'url';
-import { initDB, getProducts, saveSale, getDailySales, addProduct, getCategories, getProductsWithCategory ,
-   getSettings, updateSettings, updateProductPrice, getActiveProductsWithCategory, toggleProductStatus,
-   getAllSales, getSaleItems, getTopProducts, getSalesByHour, getSalesByRange, getDailySalesChart
-  } from './services/database.js';
+import {
+  initDB, getProducts, saveSale, getDailySales, addProduct, getCategories, getProductsWithCategory,
+  getSettings, updateSettings, updateProduct, getActiveProductsWithCategory, toggleProductStatus,
+  getAllSales, getSaleItems, getTopProducts, getSalesByHour, getSalesByRange, getDailySalesChart, 
+  addCategory,
+  updateCategory, 
+  deleteCategory, 
+  getActiveCategories
+} from './services/database.js';
 import { printTicket } from './services/printer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Definir la carpeta donde se guardarán las fotos (en la carpeta de datos del usuario)
+const IMAGES_DIR = path.join(app.getPath('userData'), 'product_images');
+
+// Registrar que el protocolo es "seguro" (privilegios)
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'safe-protocol', privileges: { standard: true, secure: true, supportFetchAPI: true } }
+]);
+
+// Crear la carpeta si no existe
+if (!fs.existsSync(IMAGES_DIR)) {
+  fs.mkdirSync(IMAGES_DIR, { recursive: true });
+}
 
 function createWindow() {
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
-    title: "TPV Pastelería - Fase 1",
+    title: "TPV Pastelería - Gestión de Ventas",
     webPreferences: {
       // Importante para la comunicación segura
       preload: path.join(__dirname, '../preload/preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
+      webSecurity: true,
     },
   });
 
@@ -33,8 +53,33 @@ function createWindow() {
   }
 }
 
+
 // Inicialización de la App
 app.whenReady().then(() => {
+// Implementar el manejador del protocolo
+protocol.handle('safe-protocol', (request) => {
+  try {
+    // request.url será algo como "safe-protocol://1770163582587-coca-cola.png"
+    const url = new URL(request.url);
+
+    // El nombre del archivo es el "host" o el "pathname" dependiendo de cómo se escriba
+    // Con safe-protocol://archivo.png, el archivo es url.host
+    const fileName = url.host;
+
+    const fullPath = path.join(IMAGES_DIR, fileName);
+
+    // Verificamos si el archivo existe antes de intentar leerlo
+    if (!fs.existsSync(fullPath)) {
+      console.error("Archivo no encontrado en el disco:", fullPath);
+      return new Response("Not Found", { status: 404 });
+    }
+
+    return net.fetch(`file://${fullPath}`);
+  } catch (error) {
+    console.error("Error en el protocolo safe-protocol:", error);
+    return new Response("Error", { status: 500 });
+  }
+});
   initDB(); // Arrancamos SQLite y creamos tablas si no existen
   createWindow();
 
@@ -58,7 +103,31 @@ ipcMain.handle('db:get-products', async () => {
 ipcMain.handle('db:get-active-products', async () => {
   return getActiveProductsWithCategory();
 });
+//#region  manejadores de categorías
+// Añadir nueva categoría
+ipcMain.handle('db:add-category', async (event, category) => {
+  return addCategory(category);
+});
+// Manejador para actualizar categoría
+ipcMain.handle('db:update-category', async (event, category) => {
+  return updateCategory(category);
+});
 
+// Manejador para borrar categoría (con validación de productos huérfanos)
+ipcMain.handle('db:delete-category', async (event, id) => {
+  try {
+    return deleteCategory(id);
+  } catch (error) {
+    // El error lanzado en database.js llega aquí y se envía al frontend
+    throw new Error(error.message); 
+  }
+});
+
+// Manejador para obtener solo categorías con productos (para la vista de Ventas)
+ipcMain.handle('db:get-active-categories', async () => {
+  return getActiveCategories();
+});
+//#endregion
 // 2. Guardar venta e imprimir
 // src/main/main.js
 ipcMain.handle('db:save-sale', async (event, saleData) => {
@@ -105,8 +174,8 @@ ipcMain.handle('db:add-product', async (event, product) => {
   }
 });
 // Nuevo manejador para actualizar el precio de un producto
-ipcMain.handle('db:update-product-price', async (event, { name, price }) => {
-  return updateProductPrice(name, price);
+ipcMain.handle('db:update-product', async (event, p) => {
+  return updateProduct(p);
 });
 
 //Cambiar el estado activo/inactivo de un producto
@@ -145,6 +214,29 @@ ipcMain.handle('db:get-products-with-category', async () => {
   } catch (error) {
     console.error("Error al obtener productos con categoría:", error);
     return [];
+  }
+});
+
+// Handler para guardar imágenes
+ipcMain.handle('upload-image', async (event, { buffer, fileName }) => {
+  try {
+    const uniqueName = `${Date.now()}-${fileName}`;
+    const destPath = path.join(IMAGES_DIR, uniqueName);
+
+    // Convertimos el ArrayBuffer que viene de React en un Buffer de Node.js
+    const nodeBuffer = Buffer.from(buffer);
+
+    if (!fs.existsSync(IMAGES_DIR)) {
+      fs.mkdirSync(IMAGES_DIR, { recursive: true });
+    }
+
+    // Guardamos el archivo directamente
+    fs.writeFileSync(destPath, nodeBuffer);
+
+    return uniqueName;
+  } catch (error) {
+    console.error("Error al guardar imagen desde buffer:", error);
+    return null;
   }
 });
 

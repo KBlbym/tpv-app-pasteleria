@@ -10,6 +10,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getActiveProductsWithCategory: () => ipcRenderer.invoke('db:get-active-products'),
 
 
+  uploadImage: (path) => ipcRenderer.invoke('upload-image', path),
+  // necesitaremos una forma de convertir el nombre en una ruta real para el <img>
+  getImagePath: (fileName) => `safe-protocol:///${path.join(IMAGES_DIR, fileName)}`,
+
   // 3. Guardar una venta
   saveSale: (sale) => ipcRenderer.invoke('db:save-sale', sale),
 
@@ -19,6 +23,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 5. Test de impresora
   printTest: () => ipcRenderer.invoke('print:test'),
 
+
   // --- FUNCIONES DE ADMINISTRACIÓN (FASE 2) ---
 
   // 1. Añadir nuevo producto
@@ -27,18 +32,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
   toggleProduct: (data) => ipcRenderer.invoke('db:toggle-product', data),
 
   // 2. Actualizar el precio de un producto
-  updateProductPrice: (data) => ipcRenderer.invoke('db:update-product-price', data),
+  updateProduct: (data) => ipcRenderer.invoke('db:update-product', data),
 
   // 3. Obtener total de ventas de hoy
   getDailySales: () => ipcRenderer.invoke('db:get-daily-sales'),
 
+  // Categorías
   // Nuevas funciones para categorías y productos con categoría
   getCategories: () => ipcRenderer.invoke('db:get-categories'),
+  
+  addCategory: (category) => ipcRenderer.invoke('db:add-category', category),
+  updateCategory: (category) => ipcRenderer.invoke('db:update-category', category),
+  deleteCategory: (id) => ipcRenderer.invoke('db:delete-category', id),
+  getActiveCategories: () => ipcRenderer.invoke('db:get-active-categories'),
 
   // Obtener productos con el nombre de su categoría
   getProductsWithCategory: () => ipcRenderer.invoke('db:get-products-with-category'),
 
-  // --- FUNCIONES DE CONFIGURACIÓN (FASE 3) ---
+
+  //======================================================//
+  //####### FUNCIONES DE CONFIGURACIÓN (FASE 3) #########//
+  //======================================================//
   getSettings: () => ipcRenderer.invoke('db:get-settings'),
   updateSettings: (settings) => ipcRenderer.invoke('db:update-settings', settings),
 

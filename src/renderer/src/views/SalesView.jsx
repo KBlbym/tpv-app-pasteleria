@@ -14,21 +14,20 @@ export default function SalesView() {
   const [lastSale, setLastSale] = useState(null);
 
   const [settings, setSettings] = useState({
-  business_name: 'Cargando...',
-  business_nif: '',
-  business_address: '',
-  business_phone: '',
-  ticket_footer: ''
-});
+    business_name: 'Cargando...',
+    business_nif: '',
+    business_address: '',
+    business_phone: '',
+    ticket_footer: ''
+  });
 
 
   useEffect(() => {
     // Carga inicial de datos
     window.electronAPI.getActiveProductsWithCategory().then(setProducts);
-    window.electronAPI.getCategories().then(setCategories);
+    window.electronAPI.getActiveCategories().then(setCategories);
     //cargar configuración
     window.electronAPI.getSettings().then(setSettings);
-       
   }, []);
 
   // Filtrado en tiempo real
@@ -64,7 +63,7 @@ export default function SalesView() {
       }
     });
   };
-
+  console.log("prodcutos:", products);
   const total = cart.reduce((acc, item) => acc + (item.price * item.qty), 0);
 
   // const handleCheckout = async () => {
@@ -76,32 +75,32 @@ export default function SalesView() {
   //   }
   // };
 
-const handleCheckout = async () => {
-  if (cart.length === 0) return;
+  const handleCheckout = async () => {
+    if (cart.length === 0) return;
 
-  const saleData = { 
-    cart: [...cart], // Clonamos para evitar problemas de referencia
-    total, 
-    date: new Date().toISOString() 
-  };
+    const saleData = {
+      cart: [...cart], // Clonamos para evitar problemas de referencia
+      total,
+      date: new Date().toISOString()
+    };
 
-  console.log("Enviando venta...", saleData);
-  
-  try {
-    const res = await window.electronAPI.saveSale(saleData);
-    console.log("Respuesta del servidor:", res); // <--- MIRA ESTO EN LA CONSOLA (F12)
+    console.log("Enviando venta...", saleData);
 
-    if (res && res.success) {
-      setLastSale({ ...saleData, id: res.id }); 
-      setShowPreview(true); 
-      setCart([]); 
-    } else {
-      alert("La venta se guardó pero hubo un problema con la respuesta.");
+    try {
+      const res = await window.electronAPI.saveSale(saleData);
+      console.log("Respuesta del servidor:", res); // <--- MIRA ESTO EN LA CONSOLA (F12)
+
+      if (res && res.success) {
+        setLastSale({ ...saleData, id: res.id });
+        setShowPreview(true);
+        setCart([]);
+      } else {
+        alert("La venta se guardó pero hubo un problema con la respuesta.");
+      }
+    } catch (err) {
+      console.error("Error en la comunicación IPC:", err);
     }
-  } catch (err) {
-    console.error("Error en la comunicación IPC:", err);
-  }
-};
+  };
   const clearCart = () => {
     if (cart.length === 0) return;
     // Opcional: añadir una confirmación rápida para evitar desastres
@@ -151,14 +150,43 @@ const handleCheckout = async () => {
             🌟 Todos
           </button>
           {categories.map(cat => (
-            <button
-              key={cat.id}
-              onClick={() => setActiveCategory(cat.id)}
-              className={`px-8 py-4 rounded-2xl font-black text-sm uppercase tracking-wider shadow-sm transition-all border-2 whitespace-nowrap ${activeCategory === cat.id ? 'bg-orange-500 border-orange-600 text-white scale-105' : 'bg-white border-transparent text-slate-500 hover:bg-slate-50'}`}
-            >
-              {cat.icon} {cat.name}
-            </button>
-          ))}
+  <button
+    key={cat.id}
+    onClick={() => setActiveCategory(cat.id)}
+    className={`relative group h-24 min-w-[140px] px-6 rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-sm transition-all border-2 overflow-hidden flex flex-col items-center justify-center gap-2 ${
+      activeCategory === cat.id 
+        ? 'bg-orange-500 border-orange-600 text-white scale-105 z-10' 
+        : 'bg-white border-slate-100 text-slate-500 hover:border-orange-200 hover:bg-slate-50'
+    }`}
+  >
+    {/* IMAGEN DE FONDO (Opcional, con opacidad baja para no tapar el texto) */}
+    {cat.image_path && (
+      <img 
+        src={`safe-protocol://${cat.image_path}`} 
+        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ${
+          activeCategory === cat.id ? 'opacity-20' : 'opacity-10 group-hover:opacity-20'
+        }`}
+        alt=""
+      />
+    )}
+
+    {/* ICONO Y NOMBRE (Encima de la imagen) */}
+    <span className={`relative z-10 text-2xl transition-transform duration-300 ${
+      activeCategory === cat.id ? 'scale-125' : 'group-hover:rotate-12'
+    }`}>
+      {cat.icon || '📁'}
+    </span>
+    
+    <span className="relative z-10 leading-none">
+      {cat.name}
+    </span>
+
+    {/* INDICADOR ACTIVO (Luz inferior) */}
+    {activeCategory === cat.id && (
+      <div className="absolute bottom-1 w-8 h-1 bg-white rounded-full animate-pulse" />
+    )}
+  </button>
+))}
         </div>
 
         {/* REJILLA DE PRODUCTOS */}
@@ -172,9 +200,32 @@ const handleCheckout = async () => {
               }}
               className="bg-white aspect-square p-4 rounded-[2rem] shadow-sm hover:shadow-xl hover:-translate-y-1 active:scale-95 transition-all flex flex-col items-center justify-center text-center border-2 border-slate-50 group"
             >
-              <span className="text-4xl mb-2 group-hover:scale-110 transition-transform">
-                {categories.find(c => c.id === p.category_id)?.icon || '🍰'}
-              </span>
+              {/* CONTENEDOR DE IMAGEN / ICONO */}
+              <div className="w-full h-1/2 flex items-center justify-center relative bg-slate-50/50">
+                {p.image_path ? (
+                  // CASO 1: Imagen del producto
+                  <img
+                    src={`safe-protocol://${p.image_path}`}
+                    alt={p.name}
+                    className="w-full h-full object-cover transition-transform group-hover:scale-110"
+                    onError={(e) => {
+                      // Si la imagen falla (ej: borrada del disco), ocultamos el <img> para que se vea el fallback
+                      e.target.style.display = 'none';
+                    }}
+                  />
+                ) : (
+                  // CASO 2 y 3: Icono de categoría o genérico
+                  <span className="text-4xl mb-2 group-hover:scale-110 transition-transform">
+                    {categories.find(c => c.id === p.category_id)?.icon || '🍰'}
+                  </span>
+                )}
+              </div>
+
+
+
+
+
+
               <span className="font-bold text-slate-700 leading-tight text-lg">{p.name}</span>
               <span className="mt-2 py-1 px-4 bg-orange-100 text-orange-700 rounded-full font-black text-xl">
                 {p.price.toFixed(2)}€
@@ -251,87 +302,87 @@ const handleCheckout = async () => {
             <span className="text-6xl font-black text-orange-400 leading-none">{total.toFixed(2)}€</span>
           </div>
           <button
-  disabled={cart.length === 0}
-  onClick={handleCheckout} // <--- Usa la función que definimos arriba
-  className="w-full bg-orange-500 hover:bg-orange-400 disabled:bg-slate-700 text-black py-6 rounded-2xl font-black text-2xl shadow-lg active:scale-95 transition-all uppercase tracking-tighter"
->
-  COBRAR (F1)
-</button>
+            disabled={cart.length === 0}
+            onClick={handleCheckout} // <--- Usa la función que definimos arriba
+            className="w-full bg-orange-500 hover:bg-orange-400 disabled:bg-slate-700 text-black py-6 rounded-2xl font-black text-2xl shadow-lg active:scale-95 transition-all uppercase tracking-tighter"
+          >
+            COBRAR (F1)
+          </button>
         </div>
       </div>
-      
-      
+
+
 
 
       {/* MODAL DE VISTA PREVIA DEL TICKET */}
-{showPreview && lastSale && (
-  <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-    <div className="bg-white w-[380px] shadow-2xl rounded-sm overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
-      
-      {/* "Papel" del Ticket */}
-      <div className="p-8 font-mono text-[13px] text-slate-800 leading-tight border-b-8 border-dotted border-slate-200">
-        
-        {/* Cabecera Fiscal */}
-        <div className="text-center space-y-1 mb-6">
-          <h2 className="font-black text-xl uppercase tracking-tighter">{settings.business_name}</h2>
-          <p className="text-[11px] font-bold">NIF: {settings.business_nif}</p>
-          <p className="text-[11px]">{settings.business_address}</p>
-          <p className="text-[11px]">TEL: {settings.business_phone}</p>
-        </div>
+      {showPreview && lastSale && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white w-[380px] shadow-2xl rounded-sm overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
 
-        <div className="border-b border-dashed border-slate-400 my-4"></div>
-        
-        {/* Info del Ticket */}
-        <div className="flex justify-between text-[11px] mb-4 font-bold">
-          <span>TICKET: #00{lastSale.id || '---'}</span>
-          <span>{new Date().toLocaleString()}</span>
-        </div>
+            {/* "Papel" del Ticket */}
+            <div className="p-8 font-mono text-[13px] text-slate-800 leading-tight border-b-8 border-dotted border-slate-200">
 
-        {/* Productos */}
-        <div className="space-y-3 mb-6">
-          {lastSale.cart.map((item, idx) => (
-            <div key={idx} className="flex justify-between items-start">
-              <span className="flex-1">{item.qty} x {item.name}</span>
-              <span className="ml-4 font-bold">{(item.qty * item.price).toFixed(2)}€</span>
+              {/* Cabecera Fiscal */}
+              <div className="text-center space-y-1 mb-6">
+                <h2 className="font-black text-xl uppercase tracking-tighter">{settings.business_name}</h2>
+                <p className="text-[11px] font-bold">NIF: {settings.business_nif}</p>
+                <p className="text-[11px]">{settings.business_address}</p>
+                <p className="text-[11px]">TEL: {settings.business_phone}</p>
+              </div>
+
+              <div className="border-b border-dashed border-slate-400 my-4"></div>
+
+              {/* Info del Ticket */}
+              <div className="flex justify-between text-[11px] mb-4 font-bold">
+                <span>TICKET: #00{lastSale.id || '---'}</span>
+                <span>{new Date().toLocaleString()}</span>
+              </div>
+
+              {/* Productos */}
+              <div className="space-y-3 mb-6">
+                {lastSale.cart.map((item, idx) => (
+                  <div key={idx} className="flex justify-between items-start">
+                    <span className="flex-1">{item.qty} x {item.name}</span>
+                    <span className="ml-4 font-bold">{(item.qty * item.price).toFixed(2)}€</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="border-b-2 border-slate-800 my-4"></div>
+
+              {/* Total */}
+              <div className="flex justify-between items-center py-2">
+                <span className="font-black text-lg text-slate-900 uppercase">Total</span>
+                <span className="font-black text-2xl text-slate-900">{lastSale.total.toFixed(2)}€</span>
+              </div>
+
+              {/* Pie de página */}
+              <div className="text-center mt-8 space-y-2">
+                <p className="italic text-slate-500 text-[11px]">{settings.ticket_footer}</p>
+                <p className="text-[10px] font-bold text-slate-400">--- IVA INCLUIDO ---</p>
+              </div>
             </div>
-          ))}
+
+            {/* Botones de acción del Modal */}
+            <div className="p-4 bg-slate-50 flex gap-3">
+              <button
+                onClick={() => setShowPreview(false)}
+                className="flex-1 bg-slate-800 text-white py-4 rounded-xl font-black text-sm hover:bg-slate-700 transition-colors"
+              >
+                CERRAR (ESC)
+              </button>
+              <button
+                onClick={() => window.print()} // Opcional: imprimir con el diálogo del sistema
+                className="bg-orange-500 text-white px-6 rounded-xl font-black hover:bg-orange-600 transition-colors"
+              >
+                🖨️
+              </button>
+            </div>
+          </div>
         </div>
-
-        <div className="border-b-2 border-slate-800 my-4"></div>
-
-        {/* Total */}
-        <div className="flex justify-between items-center py-2">
-          <span className="font-black text-lg text-slate-900 uppercase">Total</span>
-          <span className="font-black text-2xl text-slate-900">{lastSale.total.toFixed(2)}€</span>
-        </div>
-
-        {/* Pie de página */}
-        <div className="text-center mt-8 space-y-2">
-          <p className="italic text-slate-500 text-[11px]">{settings.ticket_footer}</p>
-          <p className="text-[10px] font-bold text-slate-400">--- IVA INCLUIDO ---</p>
-        </div>
-      </div>
-
-      {/* Botones de acción del Modal */}
-      <div className="p-4 bg-slate-50 flex gap-3">
-        <button 
-          onClick={() => setShowPreview(false)}
-          className="flex-1 bg-slate-800 text-white py-4 rounded-xl font-black text-sm hover:bg-slate-700 transition-colors"
-        >
-          CERRAR (ESC)
-        </button>
-        <button 
-          onClick={() => window.print()} // Opcional: imprimir con el diálogo del sistema
-          className="bg-orange-500 text-white px-6 rounded-xl font-black hover:bg-orange-600 transition-colors"
-        >
-          🖨️
-        </button>
-      </div>
-    </div>
-  </div>
-)}
+      )}
     </div>
 
-    
+
   );
 }

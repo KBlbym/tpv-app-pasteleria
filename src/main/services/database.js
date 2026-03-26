@@ -46,9 +46,13 @@ export function initDB() {
   )`);
 
   try {
-    db.prepare("ALTER TABLE products ADD COLUMN active INTEGER DEFAULT 1").run();
+    //db.prepare("ALTER TABLE products ADD COLUMN active INTEGER DEFAULT 1").run();
+    //db.prepare("ALTER TABLE products ADD COLUMN category_id INTEGER").run();
+    db.prepare("ALTER TABLE products ADD COLUMN image_path TEXT").run();
+    db.prepare("ALTER TABLE categories ADD COLUMN image_path TEXT").run();
+    console.log("las tablas ya tienen las columnas necesarias.");
   } catch (error) {
-    console.log("La columna 'active' ya existe en la tabla 'products'.", error);
+    console.log("La columna ya existe.", error);
   }
 
   // Insertar categorías por defecto si la tabla está vacía
@@ -86,14 +90,50 @@ export function initDB() {
   }
   console.log("✅ Base de datos sembrada con productos iniciales");
 }
+//#region Funciones de base de datos para categorías
 
-// Nueva función para obtener categorías
+// Añadir categoría con validación de nombre único
+export function addCategory(cat) {
+  // Comprobar si ya existe
+  const exists = db.prepare("SELECT id FROM categories WHERE LOWER(name) = LOWER(?)")
+    .get(cat.name);
+  if (exists) throw new Error("Ya existe una categoría con ese nombre");
+
+  return db.prepare(`
+    INSERT INTO categories (name, icon, image_path) VALUES (?, ?, ?)
+  `).run(cat.name, cat.icon, cat.image_path);
+}
+
+//obtener categorías
 export function getCategories() {
   return db.prepare('SELECT * FROM categories').all();
 }
 
-// Añade esto a tu database.js
-// src/main/services/database.js
+// Obtener solo categorías que tengan al menos un producto activo
+export function getActiveCategories() {
+  return db.prepare(`
+    SELECT DISTINCT c.* FROM categories c
+    INNER JOIN products p ON c.id = p.category_id
+    WHERE p.active = 1
+  `).all();
+}
+
+//  Actualizar categoría existente
+export function updateCategory(cat) {
+  return db.prepare(`
+    UPDATE categories SET name = ?, icon = ?, image_path = ? WHERE id = ?
+  `).run(cat.name, cat.icon, cat.image_path, cat.id);
+}
+// Borrar solo si no tiene productos
+export function deleteCategory(id) {
+  const hasProducts = db.prepare("SELECT id FROM products WHERE category_id = ? LIMIT 1").get(id);
+  if (hasProducts) throw new Error("No puedes borrar una categoría que contiene productos");
+
+  return db.prepare("DELETE FROM categories WHERE id = ?").run(id);
+}
+//#endregion
+
+
 
 export function saveSale({ cart, total }) { // <--- Desestructuramos aquí
   const transaction = db.transaction((cartItems, totalAmount) => {
@@ -137,9 +177,13 @@ export function addProduct(p) {
     .run(p.name, p.price, p.category_id);
 }
 // Actualizar el precio de un producto por su nombre
-export function updateProductPrice(name, price) {
-  const stmt = db.prepare('UPDATE products SET price = ? WHERE name = ?');
-  return stmt.run(price, name);
+export function updateProduct(p) {
+  const stmt = db.prepare(`
+    UPDATE products 
+    SET name = ?, price = ?, category_id = ?, image_path = ?
+    WHERE id = ?
+  `);
+  return stmt.run(p.name, p.price, p.category_id, p.image_path, p.id);
 }
 
 //Cambiar el estado activo/inactivo de un producto
@@ -218,17 +262,8 @@ export function getTopProducts(limit = 5) {
   `).all(limit);
 }
 
-// 4. Franja horaria con más ventas (Por hora del día)
-// export function getSaleByHour() {
-//   return db.prepare(`
-//     SELECT strftime('%H', date) as hour, COUNT(*) as count
-//     FROM sales
-//     GROUP BY hour
-//     ORDER BY count DESC
-//     LIMIT 1
-//   `).get();
-// }
-// En tu lógica de base de datos
+
+// lógica de base de datos
 export function getSalesByHour() {
   return db.prepare(`
     SELECT 
