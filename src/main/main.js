@@ -10,7 +10,11 @@ import {
   addCategory,
   updateCategory, 
   deleteCategory, 
-  getActiveCategories
+  getActiveCategories,
+  getActiveSession,
+  openSession,
+  closeSession
+
 } from './services/database.js';
 import { printTicket } from './services/printer.js';
 
@@ -293,3 +297,24 @@ ipcMain.handle('db:get-sales-range', async (event, { start, end }) => {
 ipcMain.handle('db:get-chart-data', async (event, { start, end }) => {
   return getDailySalesChart(start, end);
 });
+
+//======================================//
+//####### Z-Report #########//
+//======================================//
+//#region (Fase 4) implimentación Z-Report con manejo de sesiones
+
+// Validar si hay una sesión abierta antes de abrir una nueva
+ipcMain.handle('db:get-active-session', async () => {
+  return getActiveSession();
+});
+
+ipcMain.handle('db:open-session', async (event, data) => {
+  return openSession(data);
+});
+
+ipcMain.handle('db:close-session', async (event, data) => {
+  const result = await closeSession(data); 
+  return result;
+});
+
+//#endregion

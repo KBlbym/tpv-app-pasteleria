@@ -1,15 +1,12 @@
 import { useState, useEffect } from 'react';
 
-export default function SalesView() {
-
-  // Estados principales
+export default function SalesView({ activeSession }) { // <-- Recibimos la sesión por props
+  // 1. Estados principales
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [cart, setCart] = useState([]);
-  const [search, setSearch] = useState("");
-  const [activeCategory, setActiveCategory] = useState(null); // null = "Todos"
+  const [activeCategory, setActiveCategory] = useState(null);
   const [multiplier, setMultiplier] = useState(1);
-
   const [showPreview, setShowPreview] = useState(false);
   const [lastSale, setLastSale] = useState(null);
 
@@ -21,21 +18,14 @@ export default function SalesView() {
     ticket_footer: ''
   });
 
-
+  // 2. Carga de datos inicial
   useEffect(() => {
-    // Carga inicial de datos
     window.electronAPI.getActiveProductsWithCategory().then(setProducts);
     window.electronAPI.getActiveCategories().then(setCategories);
-    //cargar configuración
     window.electronAPI.getSettings().then(setSettings);
   }, []);
 
-  // Filtrado en tiempo real
-  const filteredProducts = activeCategory
-    ? products.filter(p => p.category_id === activeCategory)
-    : products;
-
-  // 1. Añadir con posibilidad de cantidad
+  // 3. Lógica del Carrito
   const addToCart = (product, qtyToAdd = 1) => {
     setCart(prev => {
       const exists = prev.find(item => item.id === product.id);
@@ -48,194 +38,122 @@ export default function SalesView() {
     });
   };
 
-  // 2. Eliminar o disminuir (Punto 1 de tu petición)
   const removeFromCart = (productId) => {
     setCart(prev => {
       const item = prev.find(i => i.id === productId);
       if (!item) return prev;
-
       if (item.qty > 1) {
-        // Si hay más de uno, disminuimos 1
         return prev.map(i => i.id === productId ? { ...i, qty: i.qty - 1 } : i);
-      } else {
-        // Si solo queda uno, lo eliminamos de la lista
-        return prev.filter(i => i.id !== productId);
       }
+      return prev.filter(i => i.id !== productId);
     });
   };
-  console.log("prodcutos:", products);
+
+  const clearCart = () => {
+    if (cart.length > 0 && confirm("¿Vaciar ticket?")) setCart([]);
+  };
+
   const total = cart.reduce((acc, item) => acc + (item.price * item.qty), 0);
 
-  // const handleCheckout = async () => {
-  //   if (cart.length === 0) return;
-  //   const result = await window.electronAPI.saveSale({ cart, total });
-  //   if (result.success) {
-  //     setCart([]);
-  //     setSearch("");
-  //   }
-  // };
-
+  // 4. Lógica de Cobro (EL CORAZÓN DE LA FASE 4)
   const handleCheckout = async () => {
     if (cart.length === 0) return;
 
+    // VALIDACIÓN CRÍTICA: Impedir venta sin sesión
+    if (!activeSession) {
+      alert("⛔ ATENCIÓN: No puedes realizar ventas sin abrir un turno de caja.\nVe a la pestaña 'Caja' para empezar.");
+      return;
+    }
+
     const saleData = {
-      cart: [...cart], // Clonamos para evitar problemas de referencia
+      cart: [...cart],
       total,
+      session_id: activeSession.id, // VINCULAMOS LA VENTA AL TURNO ACTUAL
       date: new Date().toISOString()
     };
 
-    console.log("Enviando venta...", saleData);
-
     try {
       const res = await window.electronAPI.saveSale(saleData);
-      console.log("Respuesta del servidor:", res); // <--- MIRA ESTO EN LA CONSOLA (F12)
-
       if (res && res.success) {
         setLastSale({ ...saleData, id: res.id });
         setShowPreview(true);
         setCart([]);
-      } else {
-        alert("La venta se guardó pero hubo un problema con la respuesta.");
       }
     } catch (err) {
-      console.error("Error en la comunicación IPC:", err);
+      console.error("Error al guardar venta:", err);
     }
   };
-  const clearCart = () => {
-    if (cart.length === 0) return;
-    // Opcional: añadir una confirmación rápida para evitar desastres
-    if (confirm("¿Seguro que quieres vaciar todo el ticket?")) {
-      setCart([]);
-    }
-  };
+
+  // Filtrado de productos
+  const filteredProducts = activeCategory
+    ? products.filter(p => p.category_id === activeCategory)
+    : products;
 
   return (
-    <div className="flex h-full bg-slate-100">
+    <div className="flex h-full bg-slate-100 relative">
+      
+      {/* BLOQUEO VISUAL SI NO HAY SESIÓN (UX Senior) */}
+      {!activeSession && (
+        <div className="absolute inset-0 z-50 bg-slate-100/60 backdrop-blur-[2px] flex items-center justify-center">
+          <div className="bg-white p-8 rounded-[2rem] shadow-2xl text-center border-2 border-orange-500 max-w-sm animate-bounce">
+            <span className="text-5xl mb-4 block">🔑</span>
+            <h2 className="text-xl font-black text-slate-800 uppercase italic">Caja Bloqueada</h2>
+            <p className="text-slate-500 font-bold text-sm mt-2">Debes abrir un turno en la pestaña "Caja" para poder operar el terminal.</p>
+          </div>
+        </div>
+      )}
 
-      {/* IZQUIERDA: PRODUCTOS Y CATEGORÍAS */}
+      {/* IZQUIERDA: PRODUCTOS */}
       <div className="flex-1 flex flex-col p-4 gap-4 overflow-hidden">
-
-        {/* 1. NUEVA BARRA DE MULTIPLICADOR PROFESIONAL */}
+        {/* Multiplicador */}
         <div className="flex items-center gap-2 bg-white p-3 rounded-2xl shadow-sm border border-slate-200">
           <div className="px-3 border-r border-slate-200 py-1">
             <span className="text-[10px] font-black text-slate-400 uppercase block leading-none">Cantidad</span>
-            <span className="text-lg font-black text-orange-500 leading-none">Añadir x{multiplier}</span>
+            <span className="text-lg font-black text-orange-500 leading-none">x{multiplier}</span>
           </div>
           <div className="flex gap-2 flex-1 px-2">
             {[1, 2, 6, 12, 24].map(num => (
-              <button
-                key={num}
-                onClick={() => setMultiplier(num)}
-                className={`flex-1 py-2 rounded-xl font-black transition-all ${multiplier === num ? 'bg-orange-500 text-gray-300 shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-              >
+              <button key={num} onClick={() => setMultiplier(num)}
+                className={`flex-1 py-2 rounded-xl font-black transition-all ${multiplier === num ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
                 {num}
               </button>
             ))}
-            <input
-              type="number"
-              min="1"
-              className="w-20 p-2 bg-slate-800 text-white rounded-xl text-center font-black focus:ring-2 focus:ring-orange-500 outline-none"
-              value={multiplier}
-              onChange={(e) => setMultiplier(Math.max(1, parseInt(e.target.value) || 1))}
-            />
           </div>
         </div>
 
-        {/* BARRA DE CATEGORÍAS */}
+        {/* Categorías */}
         <div className="flex gap-3 overflow-x-auto pb-2 custom-scrollbar">
-          <button
-            onClick={() => setActiveCategory(null)}
-            className={`px-8 py-4 rounded-2xl font-black text-sm uppercase tracking-wider shadow-sm transition-all border-2 ${!activeCategory ? 'bg-orange-500 border-orange-600 text-white scale-105' : 'bg-white border-transparent text-slate-500 hover:bg-slate-50'}`}
-          >
+          <button onClick={() => setActiveCategory(null)}
+            className={`px-8 py-4 rounded-2xl font-black text-sm uppercase border-2 transition-all ${!activeCategory ? 'bg-orange-500 border-orange-600 text-white' : 'bg-white border-transparent text-slate-500'}`}>
             🌟 Todos
           </button>
           {categories.map(cat => (
-  <button
-    key={cat.id}
-    onClick={() => setActiveCategory(cat.id)}
-    className={`relative group h-24 min-w-[140px] px-6 rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-sm transition-all border-2 overflow-hidden flex flex-col items-center justify-center gap-2 ${
-      activeCategory === cat.id 
-        ? 'bg-orange-500 border-orange-600 text-white scale-105 z-10' 
-        : 'bg-white border-slate-100 text-slate-500 hover:border-orange-200 hover:bg-slate-50'
-    }`}
-  >
-    {/* IMAGEN DE FONDO (Opcional, con opacidad baja para no tapar el texto) */}
-    {cat.image_path && (
-      <img 
-        src={`safe-protocol://${cat.image_path}`} 
-        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ${
-          activeCategory === cat.id ? 'opacity-20' : 'opacity-10 group-hover:opacity-20'
-        }`}
-        alt=""
-      />
-    )}
-
-    {/* ICONO Y NOMBRE (Encima de la imagen) */}
-    <span className={`relative z-10 text-2xl transition-transform duration-300 ${
-      activeCategory === cat.id ? 'scale-125' : 'group-hover:rotate-12'
-    }`}>
-      {cat.icon || '📁'}
-    </span>
-    
-    <span className="relative z-10 leading-none">
-      {cat.name}
-    </span>
-
-    {/* INDICADOR ACTIVO (Luz inferior) */}
-    {activeCategory === cat.id && (
-      <div className="absolute bottom-1 w-8 h-1 bg-white rounded-full animate-pulse" />
-    )}
-  </button>
-))}
+            <button key={cat.id} onClick={() => setActiveCategory(cat.id)}
+              className={`relative h-20 min-w-[120px] rounded-2xl font-black text-xs uppercase border-2 overflow-hidden flex flex-col items-center justify-center transition-all ${activeCategory === cat.id ? 'bg-orange-500 border-orange-600 text-white' : 'bg-white border-slate-100 text-slate-500'}`}>
+              {cat.image_path && <img src={`safe-protocol://${cat.image_path}`} className="absolute inset-0 w-full h-full object-cover opacity-20" alt=""/>}
+              <span className="relative z-10 text-xl">{cat.icon}</span>
+              <span className="relative z-10">{cat.name}</span>
+            </button>
+          ))}
         </div>
 
-        {/* REJILLA DE PRODUCTOS */}
-        <div className="flex-1 overflow-y-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 pr-2">
+        {/* Rejilla de Productos */}
+        <div className="flex-1 overflow-y-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {filteredProducts.map(p => (
-            <button
-              key={p.id}
-              onClick={() => {
-                addToCart(p, multiplier); // Añadimos la cantidad seleccionada
-                setMultiplier(1);         // Reseteamos a 1 para la próxima venta
-              }}
-              className="bg-white aspect-square p-4 rounded-[2rem] shadow-sm hover:shadow-xl hover:-translate-y-1 active:scale-95 transition-all flex flex-col items-center justify-center text-center border-2 border-slate-50 group"
-            >
-              {/* CONTENEDOR DE IMAGEN / ICONO */}
-              <div className="w-full h-1/2 flex items-center justify-center relative bg-slate-50/50">
-                {p.image_path ? (
-                  // CASO 1: Imagen del producto
-                  <img
-                    src={`safe-protocol://${p.image_path}`}
-                    alt={p.name}
-                    className="w-full h-full object-cover transition-transform group-hover:scale-110"
-                    onError={(e) => {
-                      // Si la imagen falla (ej: borrada del disco), ocultamos el <img> para que se vea el fallback
-                      e.target.style.display = 'none';
-                    }}
-                  />
-                ) : (
-                  // CASO 2 y 3: Icono de categoría o genérico
-                  <span className="text-4xl mb-2 group-hover:scale-110 transition-transform">
-                    {categories.find(c => c.id === p.category_id)?.icon || '🍰'}
-                  </span>
-                )}
+            <button key={p.id} onClick={() => { addToCart(p, multiplier); setMultiplier(1); }}
+              className="bg-white p-4 rounded-[2rem] shadow-sm hover:shadow-xl transition-all flex flex-col items-center border-2 border-slate-50 group">
+              <div className="w-full h-24 flex items-center justify-center bg-slate-50 rounded-2xl mb-2 overflow-hidden">
+                {p.image_path ? <img src={`safe-protocol://${p.image_path}`} className="w-full h-full object-cover group-hover:scale-110 transition-transform" /> 
+                : <span className="text-4xl">{categories.find(c => c.id === p.category_id)?.icon || '🥐'}</span>}
               </div>
-
-
-
-
-
-
-              <span className="font-bold text-slate-700 leading-tight text-lg">{p.name}</span>
-              <span className="mt-2 py-1 px-4 bg-orange-100 text-orange-700 rounded-full font-black text-xl">
-                {p.price.toFixed(2)}€
-              </span>
+              <span className="font-bold text-slate-700 text-sm h-10 flex items-center">{p.name}</span>
+              <span className="mt-2 py-1 px-4 bg-orange-100 text-orange-700 rounded-full font-black">{p.price.toFixed(2)}€</span>
             </button>
           ))}
         </div>
       </div>
 
-      {/* DERECHA: TICKET (Sidebar) */}
+        {/* DERECHA: TICKET (Sidebar) */}
       <div className="w-[450px] bg-white border-l border-slate-200 flex flex-col shadow-2xl">
         <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
           <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2">
@@ -312,9 +230,7 @@ export default function SalesView() {
       </div>
 
 
-
-
-      {/* MODAL DE VISTA PREVIA DEL TICKET */}
+       {/* MODAL DE VISTA PREVIA DEL TICKET */}
       {showPreview && lastSale && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white w-[380px] shadow-2xl rounded-sm overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
@@ -382,7 +298,5 @@ export default function SalesView() {
         </div>
       )}
     </div>
-
-
   );
 }

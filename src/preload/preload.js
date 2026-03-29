@@ -66,5 +66,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getStats: (limit) => ipcRenderer.invoke('db:get-stats', limit),
   getSalesRange: (range) => ipcRenderer.invoke('db:get-sales-range', range),
   getDailySalesChart: (range) => ipcRenderer.invoke('db:get-chart-data', range),
+
+
+
+//======================================//
+  //####### cierre de caja #########//
+  //======================================//
+  getActiveSession: () => ipcRenderer.invoke('db:get-active-session'),
+  openSession: (data) => ipcRenderer.invoke('db:open-session', data),
+  closeSession: (data) => ipcRenderer.invoke('db:close-session', data),
 });
 

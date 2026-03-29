@@ -45,12 +45,27 @@ export function initDB() {
     FOREIGN KEY(sale_id) REFERENCES sales(id)
   )`);
 
+// Tabla de Sesiones de Caja
+  db.exec(`
+  CREATE TABLE IF NOT EXISTS cash_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_name TEXT NOT NULL,
+    start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    end_time DATETIME,
+    initial_cash REAL NOT NULL, -- Lo que hay en caja al empezar
+    closing_cash REAL,          -- Lo que el empleado cuenta al salir
+    status TEXT DEFAULT 'OPEN'  -- 'OPEN', 'CLOSED'
+  )
+`);
+
   try {
     //db.prepare("ALTER TABLE products ADD COLUMN active INTEGER DEFAULT 1").run();
     //db.prepare("ALTER TABLE products ADD COLUMN category_id INTEGER").run();
     db.prepare("ALTER TABLE products ADD COLUMN image_path TEXT").run();
     db.prepare("ALTER TABLE categories ADD COLUMN image_path TEXT").run();
     console.log("las tablas ya tienen las columnas necesarias.");
+    // Aseguramos que las ventas apunten a la sesión, no solo a la fecha
+    db.prepare("ALTER TABLE sales ADD COLUMN session_id INTEGER").run();
   } catch (error) {
     console.log("La columna ya existe.", error);
   }
@@ -295,4 +310,38 @@ export function getDailySalesChart(startDate, endDate) {
     GROUP BY day
     ORDER BY day ASC
   `).all(startDate, endDate);
+}
+
+
+//==================================//
+//####### cierre de caja #########//
+//==================================//
+export function getActiveSession() {
+  // Buscamos la sesión que no tenga end_time o cuyo status sea OPEN
+  return db.prepare("SELECT * FROM cash_sessions WHERE status = 'OPEN'").get();
+}
+
+export function openSession({ user_name, initial_cash }) {
+  const stmt = db.prepare(`
+    INSERT INTO cash_sessions (user_name, initial_cash, status, start_time)
+    VALUES (?, ?, 'OPEN', CURRENT_TIMESTAMP)
+  `);
+  return stmt.run(user_name, initial_cash);
+}
+
+export function closeSession({ session_id, closing_cash }) {
+ try {
+    const stmt = db.prepare(`
+      UPDATE cash_sessions 
+      SET end_time = CURRENT_TIMESTAMP, 
+          closing_cash = ?, 
+          status = 'CLOSED' 
+      WHERE id = ? AND status = 'OPEN'
+    `);
+    const info = stmt.run(closing_cash, session_id);
+    return { success: info.changes > 0 }; // Devuelve un objeto simple, no el statement
+  } catch (error) {
+    console.error("Error SQL en closeSession:", error);
+    throw error;
+  }
 }
