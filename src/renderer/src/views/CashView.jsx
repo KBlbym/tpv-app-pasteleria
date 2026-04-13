@@ -1,12 +1,66 @@
 import { useState } from 'react';
 
 export default function CashView({ activeSession, onRefresh }) {
-    // Estado para el formulario de apertura
     const [openData, setOpenData] = useState({ worker: '', cash: '' });
-
-    // Estado para el cierre (sustituye al prompt)
     const [closingCash, setClosingCash] = useState('');
     const [isClosing, setIsClosing] = useState(false);
+
+    // Estados nuevos para el Cierre Z unificado
+    const [isClosingZ, setIsClosingZ] = useState(false);
+    const [zClosingCash, setZClosingCash] = useState('');
+    const [xReportPreview, setXReportPreview] = useState(null);
+    const [zReportPreview, setZReportPreview] = useState(null);
+
+    const handleGenerateZ = async () => {
+        try {
+            const data = await window.electronAPI.getZReport();
+            if (!data.sessions || data.sessions.length === 0) {
+                alert("No hay sesiones cerradas para generar un reporte Z.");
+                return;
+            }
+            setZReportPreview(data);
+        } catch (err) {
+            alert("Error al obtener datos Z: " + err.message);
+        }
+    };
+
+
+    // Función para Cierre Z + Cierre de Sesión Activa (Formulario final)
+    const handleZWithActiveSession = async () => {
+        if (!zClosingCash) return alert("Introduce el efectivo total");
+        const amount = parseFloat(zClosingCash);
+
+        // Validamos descuadre solo como aviso
+        const proceed = await validateCashGap(activeSession.id, amount);
+        if (!proceed) return;
+
+        try {
+            const data = await window.electronAPI.closeDayAndSession({
+                session_id: activeSession.id,
+                closing_cash: amount
+            });
+            setZReportPreview(data);
+            setIsClosingZ(false);
+            setZClosingCash('');
+            onRefresh();
+        } catch (err) { alert("Error: " + err.message); }
+    };
+
+
+    const confirmZReport = async () => {
+        if (confirm("¿Estás seguro? Esto archivará todas las sesiones del día.")) {
+            try {
+                const idsToArchive = zReportPreview.sessions.map(s => s.id);
+                await window.electronAPI.archiveSessions(idsToArchive);
+                alert("✅ Jornada finalizada y archivada.");
+                setZReportPreview(null);
+                onRefresh();
+            } catch (err) {
+                alert("Error: " + err.message);
+            }
+        }
+    };
+
 
     const handleOpen = async () => {
         if (!openData.worker || !openData.cash) return alert("Completa los datos");
@@ -15,118 +69,261 @@ export default function CashView({ activeSession, onRefresh }) {
                 user_name: openData.worker,
                 initial_cash: parseFloat(openData.cash)
             });
-            onRefresh(); // Actualiza App.jsx
+            onRefresh();
             setOpenData({ worker: '', cash: '' });
         } catch (err) {
             alert("Error al abrir: " + err.message);
         }
     };
 
+    // const handleCloseFinal = async () => {
+    //     if (!closingCash) return alert("Introduce el efectivo");
+    //     const amount = parseFloat(closingCash);
+
+    //     // Validamos descuadre solo como aviso
+    //     const proceed = await validateCashGap(activeSession.id, amount);
+    //     if (!proceed) return;
+
+    //     try {
+    //         await window.electronAPI.closeSession({
+    //             session_id: activeSession.id,
+    //             closing_cash: amount
+    //         });
+    //         setIsClosing(false);
+    //         setClosingCash('');
+    //         setTimeout(() => onRefresh(), 100);
+    //     } catch (err) { alert("Error: " + err.message); }
+    // };
+
     const handleCloseFinal = async () => {
-  if (!closingCash) return alert("Introduce el efectivo");
-  
-  // 1. Bloqueamos el botón visualmente para evitar doble click
-  const tempId = activeSession.id;
-  
-  try {
-    // 2. Ejecutamos el cierre
-    await window.electronAPI.closeSession({ 
-      session_id: tempId, 
-      closing_cash: parseFloat(closingCash) 
-    });
+        if (!closingCash) return alert("Introduce el efectivo");
+        const amount = parseFloat(closingCash);
 
-    // 3. LIMPIEZA INMEDIATA DE LA UI (Sin esperar al refresh)
-    // Esto quita el "congelamiento" visual al instante
-    setIsClosing(false);
-    setClosingCash('');
-    setOpenData({ worker: '', cash: '' });
+        // Validamos descuadre
+        const proceed = await validateCashGap(activeSession.id, amount);
+        if (!proceed) return;
 
-    // 4. PEQUEÑO RETRASO PARA EL REFRESH (Truco Senior)
-    // Damos 100ms para que SQLite termine de escribir antes de que App.jsx intente leer
-    setTimeout(async () => {
-      await onRefresh();
-      alert("✅ Turno cerrado.");
-    }, 100);
+        try {
+            // 1. Cerramos la sesión en DB
+            await window.electronAPI.closeSession({
+                session_id: activeSession.id,
+                closing_cash: amount
+            });
 
-  } catch (err) {
-    alert("Error: " + err.message);
-  }
-};
+            // 2. Obtenemos datos para la vista previa del Reporte X
+            const reportX = await window.electronAPI.getXReport(activeSession.id);
+
+            // 3. Mostramos el modal y limpiamos estados
+            setXReportPreview(reportX);
+            setIsClosing(false);
+            setClosingCash('');
+            // Nota: El onRefresh() se llama al cerrar el modal del Reporte X
+        } catch (err) {
+            alert("Error al cerrar turno: " + err.message);
+        }
+    };
+
+    ///##############################///
+    //===== VALIDACIONES Y FUNCIONES AUXILIARES =====//
+    ///##############################///
+
+
+
+    // --- CIERRE X (Turno) ---
+    const initCloseX = async () => {
+        try {
+            const hasSales = await window.electronAPI.checkSessionSales(activeSession.id);
+
+            if (!hasSales) {
+                //  preguntamos
+                const confirmEmpty = confirm("⚠️ No has registrado ventas en este turno. ¿Deseas cerrar el turno de todas formas?");
+                if (!confirmEmpty) return;
+            }
+
+            setIsClosing(true);
+        } catch (err) {
+            setIsClosing(true); // Si hay error en la validación, dejamos cerrar igual
+        }
+    };
+
+    // --- CIERRE Z (Jornada) ---
+    const initCloseZ = async () => {
+        try {
+            let hasActivity = false;
+
+            if (activeSession) {
+                hasActivity = await window.electronAPI.checkSessionSales(activeSession.id);
+            } else {
+                hasActivity = await window.electronAPI.checkPendingZSales();
+            }
+
+            if (!hasActivity) {
+                const confirmEmptyZ = confirm("📝 La jornada no tiene ventas registradas. ¿Deseas generar el reporte Z de " + (activeSession ? "cierre de día" : "sesiones cerradas") + " igualmente?");
+                if (!confirmEmptyZ) return;
+            }
+
+            setIsClosingZ(true);
+        } catch (err) {
+            setIsClosingZ(true);
+        }
+    };
+
+    // Función auxiliar para validar el descuadre
+    const validateCashGap = async (sessionId, enteredCash) => {
+        const expected = await window.electronAPI.getExpectedCash(sessionId);
+        const gap = Math.abs(expected - enteredCash);
+
+        // Si el descuadre es mayor a 0.01€ (por aquello de los decimales)
+        if (gap > 0.01) {
+            return confirm(
+                `⚠️ ATENCIÓN: DESCUADRE DE CAJA\n\n` +
+                `Esperado: ${expected.toFixed(2)}€\n` +
+                `Contado: ${enteredCash.toFixed(2)}€\n` +
+                `Diferencia: ${(enteredCash - expected).toFixed(2)}€\n\n` +
+                `¿Deseas continuar con el cierre de todas formas?`
+            );
+        }
+        return true; // Si todo coincide, adelante
+    };
+    ///##############################///
+    //===== FIN VALIDACIONES Y FUNCIONES AUXILIARES =====//
+    ///##############################///
 
     return (
-        <div className="h-full p-10 flex flex-col items-center justify-center bg-slate-50 animate-in fade-in duration-500">
-            <div className="max-w-md w-full">
+        <div className="h-full p-10 flex flex-col items-center justify-center bg-slate-100 animate-in fade-in duration-500 relative overflow-hidden">
+            <div className="max-w-md w-full z-10">
                 {!activeSession ? (
-                    /* --- VISTA: APERTURA DE CAJA --- */
-                    <div className="bg-white p-10 rounded-[2.5rem] shadow-xl border border-slate-200">
+                    /* --- VISTA: APERTURA --- */
+                    <div className="bg-white p-10 rounded-[2.5rem] shadow-2xl border border-slate-200">
                         <div className="text-center mb-8">
-                            <span className="text-4xl">🔐</span>
-                            <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tighter mt-2">Apertura de Turno</h2>
-                            <p className="text-slate-400 text-sm font-bold">Introduce los datos para comenzar</p>
+                            <div className="text-5xl mb-4">🏪</div>
+                            <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tighter">Nueva Jornada</h2>
                         </div>
-
                         <div className="space-y-4">
-                            <input
-                                type="text" placeholder="Nombre del trabajador"
-                                className="w-full p-4 bg-slate-100 rounded-2xl outline-none focus:ring-2 ring-orange-500 font-bold"
-                                value={openData.worker} onChange={e => setOpenData({ ...openData, worker: e.target.value })}
-                            />
-                            <input
-                                type="number" placeholder="Efectivo inicial en caja (€)"
-                                className="w-full p-4 bg-slate-100 rounded-2xl outline-none focus:ring-2 ring-orange-500 font-bold"
-                                value={openData.cash} onChange={e => setOpenData({ ...openData, cash: e.target.value })}
-                            />
-                            <button onClick={handleOpen} className="w-full py-5 bg-orange-500 text-white rounded-2xl font-black text-xl hover:bg-orange-600 transition-all shadow-lg shadow-orange-100">
-                                ABRIR CAJA
-                            </button>
+                            <input type="text" placeholder="Cajero" className="w-full p-4 bg-slate-50 rounded-2xl outline-none border-2 border-transparent focus:border-orange-500 font-bold" value={openData.worker} onChange={e => setOpenData({ ...openData, worker: e.target.value })} />
+                            <input type="number" placeholder="Fondo de Caja (€)" className="w-full p-4 bg-slate-50 rounded-2xl outline-none border-2 border-transparent focus:border-orange-500 font-bold" value={openData.cash} onChange={e => setOpenData({ ...openData, cash: e.target.value })} />
+                            <button onClick={handleOpen} className="w-full py-5 bg-orange-500 text-white rounded-2xl font-black text-xl hover:bg-orange-600 transition-all shadow-lg">INICIAR TURNO</button>
                         </div>
                     </div>
                 ) : (
-                    /* --- VISTA: CAJA ACTIVA / CIERRE --- */
+                    /* --- VISTA: CAJA ACTIVA --- */
                     <div className="space-y-6">
-                        <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border-2 border-green-500">
-                            <div className="text-center mb-6">
-                                <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto text-2xl mb-4">🔓</div>
-                                <h2 className="text-2xl font-black text-slate-800 uppercase italic">Turno en Curso</h2>
-                                <p className="text-slate-400 font-bold">Cajero: <span className="text-slate-700">{activeSession.user_name}</span></p>
-                            </div>
+                        <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border-t-8 border-green-500 text-center">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Sesión Activa</p>
+                            <h2 className="text-3xl font-black text-slate-800 mb-6 underline decoration-green-500 underline-offset-4">{activeSession.user_name}</h2>
 
                             {!isClosing ? (
-                                <button
-                                    onClick={() => setIsClosing(true)}
-                                    className="w-full py-5 bg-slate-800 text-white rounded-2xl font-black text-lg hover:bg-slate-900 transition-all shadow-xl"
-                                >
-                                    📉 INICIAR CIERRE DE TURNO (X)
-                                </button>
+                                <button onClick={initCloseX} className="w-full py-4 bg-slate-800 text-white rounded-2xl font-black hover:bg-black transition-all">📉 CERRAR MI TURNO (X)</button>
                             ) : (
-                                <div className="space-y-4 p-4 bg-orange-50 rounded-2xl border border-orange-100 animate-in zoom-in-95">
-                                    <p className="text-[10px] font-black text-orange-600 uppercase text-center">Contar efectivo físico en cajón</p>
-                                    <input
-                                        type="number" autoFocus placeholder="Total contado (€)"
-                                        className="w-full p-4 bg-white rounded-xl border-2 border-orange-200 outline-none text-center font-black text-2xl"
-                                        value={closingCash} onChange={e => setClosingCash(e.target.value)}
-                                    />
+                                <div className="space-y-4 animate-in zoom-in-95">
+                                    <input type="number" autoFocus placeholder="Contante en caja (€)" className="w-full p-4 bg-orange-50 rounded-2xl border-2 border-orange-200 outline-none text-center font-black text-2xl" value={closingCash} onChange={e => setClosingCash(e.target.value)} />
                                     <div className="flex gap-2">
-                                        <button onClick={() => setIsClosing(false)} className="flex-1 py-3 bg-slate-200 text-slate-600 rounded-xl font-bold">Cancelar</button>
-                                        <button onClick={handleCloseFinal} className="flex-[2] py-3 bg-orange-500 text-white rounded-xl font-black">CONFIRMAR CIERRE</button>
+                                        <button onClick={() => setIsClosing(false)} className="flex-1 py-3 text-slate-500 font-bold">Cancelar</button>
+                                        <button onClick={handleCloseFinal} className="flex-[2] py-3 bg-orange-500 text-white rounded-xl font-black">CONFIRMAR</button>
                                     </div>
                                 </div>
                             )}
                         </div>
 
-                        {/* BOTÓN Z - SIEMPRE DISPONIBLE PERO DIFERENCIADO */}
-                        <div className="p-6 bg-slate-900 rounded-[2rem] text-center shadow-2xl">
-                            <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] mb-3">Auditoría Final de Jornada</p>
-                            <button
-                                onClick={() => alert("Generando Z-Report...")}
-                                className="w-full py-4 border border-slate-700 text-slate-300 rounded-xl font-black hover:bg-slate-800 transition-all"
-                            >
-                                🌙 EJECUTAR CIERRE DEL DÍA (Z)
-                            </button>
+                        {/* SECCIÓN Z UNIFICADA */}
+                        <div className="p-6 bg-slate-900 rounded-[2.5rem] text-center shadow-2xl">
+                            {!isClosingZ ? (
+                                <button onClick={initCloseZ} className="w-full py-4 text-orange-400 border-2 border-orange-400/30 rounded-2xl font-black hover:bg-orange-500 hover:text-white transition-all">🌙 CIERRE FINAL JORNADA (Z)</button>
+                            ) : (
+                                <div className="space-y-4 animate-in slide-in-from-bottom-4 text-white">
+                                    <p className="font-bold text-xs uppercase text-orange-400">Arqueo Final del Día</p>
+                                    <input type="number" autoFocus placeholder="Total Efectivo (€)" className="w-full p-4 bg-slate-800 border border-slate-700 rounded-2xl text-white text-center font-black text-3xl outline-none focus:border-orange-500" value={zClosingCash} onChange={e => setZClosingCash(e.target.value)} />
+                                    <div className="flex gap-4">
+                                        <button onClick={() => setIsClosingZ(false)} className="text-slate-500 font-bold uppercase text-xs">Atrás</button>
+                                        <button onClick={handleZWithActiveSession} className="flex-1 py-3 bg-orange-600 rounded-xl font-black text-sm uppercase tracking-widest hover:bg-orange-500">Generar Z</button>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}
             </div>
+
+            {/* --- MODAL VISTA PREVIA REPORTE Z (ESTILO TICKET) --- */}
+            {zReportPreview && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+                    <div className="bg-white w-full max-w-sm rounded-lg shadow-2xl flex flex-col max-h-[90vh] animate-in zoom-in-95">
+
+                        {/* Cabecera del Ticket */}
+                        <div className="p-6 border-b border-dashed border-slate-200 text-center">
+                            <h3 className="font-black text-xl uppercase tracking-tighter">Vista Previa Reporte Z</h3>
+                            <p className="text-[10px] text-slate-400 font-mono mt-1">{new Date().toLocaleString()}</p>
+                        </div>
+
+                        {/* Cuerpo del Ticket (Scrollable) */}
+                        <div className="flex-1 overflow-y-auto p-6 font-mono text-sm space-y-4">
+                            <div className="border-b border-slate-100 pb-2">
+                                <div className="flex justify-between"><span>TOTAL VENTAS:</span><span className="font-bold">{zReportPreview.total_sales.toFixed(2)}€</span></div>
+                                <div className="flex justify-between"><span>Nº TICKETS:</span><span>{zReportPreview.sales_count}</span></div>
+                            </div>
+
+                            <div className="space-y-3">
+                                <p className="text-[10px] font-bold text-slate-400 border-b border-slate-50 pb-1 uppercase">Desglose de Turnos:</p>
+                                {zReportPreview.sessions.map(s => (
+                                    <div key={s.id} className="text-xs">
+                                        <div className="flex justify-between font-bold">
+                                            <span>{s.user_name} (ID:{s.id})</span>
+                                            <span>{s.closing_cash?.toFixed(2)}€</span>
+                                        </div>
+                                        <div className="flex justify-between text-[10px] text-slate-500">
+                                            <span>Fondo: {s.initial_cash.toFixed(2)}€</span>
+                                            <span>Neto: {(s.closing_cash - s.initial_cash).toFixed(2)}€</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="pt-4 border-t-2 border-dashed border-slate-200 text-center italic text-xs">
+                                <p>*** Fin del Reporte ***</p>
+                            </div>
+                        </div>
+
+                        {/* Botones de Acción */}
+                        <div className="p-4 bg-slate-50 flex gap-2">
+                            <button onClick={() => setZReportPreview(null)} className="flex-1 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-600 text-xs uppercase">Cerrar</button>
+                            <button onClick={confirmZReport} className="flex-[2] py-3 bg-slate-900 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-black">Imprimir y Archivar</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* --- MODAL VISTA PREVIA REPORTE X (ARQUEO DE TURNO) --- */}
+            {xReportPreview && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[110] p-4">
+                    <div className="bg-white w-full max-w-sm rounded-lg shadow-2xl flex flex-col animate-in zoom-in-95">
+                        <div className="p-6 border-b border-dashed border-slate-200 text-center">
+                            <h3 className="font-black text-xl uppercase italic">Arqueo de Turno (X)</h3>
+                            <p className="text-[10px] text-slate-400 font-mono">ID SESIÓN: {xReportPreview.id}</p>
+                        </div>
+
+                        <div className="p-6 font-mono text-sm space-y-3">
+                            <div className="flex justify-between font-bold text-lg border-b pb-2">
+                                <span>EMPLEADO:</span>
+                                <span>{xReportPreview.user_name}</span>
+                            </div>
+                            <div className="flex justify-between"><span>FONDO INICIAL:</span><span>{xReportPreview.initial_cash.toFixed(2)}€</span></div>
+                            <div className="flex justify-between"><span>VENTAS TURNO:</span><span>{xReportPreview.total_sales.toFixed(2)}€</span></div>
+                            <div className="flex justify-between border-t pt-2 text-slate-500"><span>ESPERADO:</span><span>{xReportPreview.expected_cash.toFixed(2)}€</span></div>
+                            <div className="flex justify-between font-black text-orange-600"><span>CONTADO:</span><span>{xReportPreview.closing_cash.toFixed(2)}€</span></div>
+                            <div className="flex justify-between border-t border-dashed pt-2 font-bold italic">
+                                <span>DIFERENCIA:</span>
+                                <span>{(xReportPreview.closing_cash - xReportPreview.expected_cash).toFixed(2)}€</span>
+                            </div>
+                        </div>
+
+                        <div className="p-4 bg-slate-50 flex flex-col gap-2">
+                            <button onClick={() => { setXReportPreview(null); onRefresh(); }} className="w-full py-4 bg-slate-900 text-white rounded-xl font-black uppercase text-xs tracking-widest">
+                                🖨️ IMPRIMIR Y FINALIZAR
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

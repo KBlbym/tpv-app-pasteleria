@@ -40,7 +40,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Categorías
   // Nuevas funciones para categorías y productos con categoría
   getCategories: () => ipcRenderer.invoke('db:get-categories'),
-  
+
   addCategory: (category) => ipcRenderer.invoke('db:add-category', category),
   updateCategory: (category) => ipcRenderer.invoke('db:update-category', category),
   deleteCategory: (id) => ipcRenderer.invoke('db:delete-category', id),
@@ -69,11 +69,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
 
 
-//======================================//
+  //======================================//
   //####### cierre de caja #########//
   //======================================//
   getActiveSession: () => ipcRenderer.invoke('db:get-active-session'),
   openSession: (data) => ipcRenderer.invoke('db:open-session', data),
   closeSession: (data) => ipcRenderer.invoke('db:close-session', data),
+  getZReport: () => ipcRenderer.invoke('db:get-z-report'),
+  closeDayAndSession: (data) => ipcRenderer.invoke('db:close-day-session', data),
+  archiveSessions: (ids) => ipcRenderer.invoke('db:archive-sessions', ids),
+  checkSessionSales: (id) => ipcRenderer.invoke('db:check-session-sales', id),
+  checkPendingZSales: () => ipcRenderer.invoke('db:check-z-sales'),
+  getExpectedCash: (id) => ipcRenderer.invoke('db:get-expected-cash', id),
+  getActiveSessionSales: () => ipcRenderer.invoke('db:get-active-session-sales'),
+  getXReport: (id) => ipcRenderer.invoke('db:get-x-report', id),
+
 });
 

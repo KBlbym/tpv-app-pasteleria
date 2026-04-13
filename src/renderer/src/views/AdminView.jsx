@@ -13,6 +13,7 @@ export default function AdminView() {
   const [categories, setCategories] = useState([]);
   const [settings, setSettings] = useState({});
   const [dailyTotal, setDailyTotal] = useState(0);
+  const [activeSessionTotal, setActiveSessionTotal] = useState(0);
 
   // 2. Función para cargar TODO de golpe desde la base de datos
   const loadAllData = async () => {
@@ -20,11 +21,14 @@ export default function AdminView() {
     const c = await window.electronAPI.getCategories();
     const s = await window.electronAPI.getSettings();
     const t = await window.electronAPI.getDailySales();
-    
+    const ast = await window.electronAPI.getActiveSessionSales();
+
     setProducts(p || []);
     setCategories(c || []);
     setSettings(s || {});
     setDailyTotal(t || 0);
+    setActiveSessionTotal(ast || 0);
+
   };
 
   useEffect(() => {
@@ -35,7 +39,7 @@ export default function AdminView() {
   const renderContent = () => {
     switch (activeTab) {
       case 'resumen': 
-        return <DashboardSection dailyTotal={dailyTotal} productCount={products.length} />;
+        return <DashboardSection dailyTotal={dailyTotal} activeSessionTotal={activeSessionTotal} productCount={products.length} />;
       case 'inventario': 
         return <InventorySection products={products} categories={categories} onRefresh={loadAllData} />;
       case 'empresa': 
@@ -46,7 +50,7 @@ export default function AdminView() {
       case 'reportes': 
         return <HistorySection />; // Necesitarás crear este archivo también
       default: 
-        return <DashboardSection dailyTotal={dailyTotal} productCount={products.length} />;
+        return <DashboardSection dailyTotal={dailyTotal} activeSessionTotal={activeSessionTotal} productCount={products.length} />;
     }
   };
 

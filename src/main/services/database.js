@@ -12,30 +12,36 @@ export function initDB() {
   db.exec(`CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE,
-    icon TEXT -- Para guardar el emoji o nombre de icono
+    icon TEXT 
   )`);
-  // Nueva tabla de configuración
+
+  // Tabla de configuración
   db.exec(`CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT
   )`);
 
-  // 2. Tabla de Productos (con clave foránea)
+  // Tabla de Productos
   db.exec(`CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     price REAL,
     category_id INTEGER,
+    active INTEGER DEFAULT 1,
+    image_path TEXT,
     FOREIGN KEY(category_id) REFERENCES categories(id)
   )`);
-  // Tabla de Ventas (Cabecera)
+
+  // Tabla de Ventas (CORREGIDA: Ahora incluye session_id desde el inicio)
   db.exec(`CREATE TABLE IF NOT EXISTS sales (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     total REAL,
-    date DATETIME DEFAULT CURRENT_TIMESTAMP
+    session_id INTEGER,
+    date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(session_id) REFERENCES cash_sessions(id)
   )`);
 
-  // Tabla de Líneas de Venta (Detalle)
+  // Tabla de Líneas de Venta
   db.exec(`CREATE TABLE IF NOT EXISTS sale_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     sale_id INTEGER,
@@ -45,32 +51,33 @@ export function initDB() {
     FOREIGN KEY(sale_id) REFERENCES sales(id)
   )`);
 
-// Tabla de Sesiones de Caja
+  // Tabla de Sesiones de Caja
   db.exec(`
-  CREATE TABLE IF NOT EXISTS cash_sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_name TEXT NOT NULL,
-    start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-    end_time DATETIME,
-    initial_cash REAL NOT NULL, -- Lo que hay en caja al empezar
-    closing_cash REAL,          -- Lo que el empleado cuenta al salir
-    status TEXT DEFAULT 'OPEN'  -- 'OPEN', 'CLOSED'
-  )
-`);
+    CREATE TABLE IF NOT EXISTS cash_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_name TEXT NOT NULL,
+      start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+      end_time DATETIME,
+      initial_cash REAL NOT NULL,
+      closing_cash REAL,
+      status TEXT DEFAULT 'OPEN'
+    )
+  `);
 
+  // Mantenimiento de columnas para DBs ya existentes
   try {
-    //db.prepare("ALTER TABLE products ADD COLUMN active INTEGER DEFAULT 1").run();
-    //db.prepare("ALTER TABLE products ADD COLUMN category_id INTEGER").run();
     db.prepare("ALTER TABLE products ADD COLUMN image_path TEXT").run();
     db.prepare("ALTER TABLE categories ADD COLUMN image_path TEXT").run();
-    console.log("las tablas ya tienen las columnas necesarias.");
-    // Aseguramos que las ventas apunten a la sesión, no solo a la fecha
+  } catch (e) { }
+
+  try {
+    // ERROR CORREGIDO: Aseguramos que la columna session_id exista en sales si la tabla ya fue creada antes
     db.prepare("ALTER TABLE sales ADD COLUMN session_id INTEGER").run();
   } catch (error) {
-    console.log("La columna ya existe.", error);
+    // Si ya existe, no hacemos nada
   }
 
-  // Insertar categorías por defecto si la tabla está vacía
+  // Sembrado de datos (Categorías)
   const countCategories = db.prepare('SELECT COUNT(*) as total FROM categories').get();
   if (countCategories.total === 0) {
     const insertCat = db.prepare('INSERT INTO categories (name, icon) VALUES (?, ?)');
@@ -79,23 +86,20 @@ export function initDB() {
     insertCat.run('Panadería', '🥖');
     insertCat.run('Cafetería', '☕');
   }
-  // Insertar algunos productos de prueba si la tabla está vacía
+
+  // Sembrado de datos (Productos)
   const countProducts = db.prepare('SELECT COUNT(*) as count FROM products').get();
   if (countProducts.count === 0) {
-    // ⚠️ Fíjate en el nombre de la columna: category_id
     const insert = db.prepare('INSERT INTO products (name, price, category_id) VALUES (?, ?, ?)');
-
-    insert.run('Croissant', 1.50, 1);       // 1 = Bollería
-    insert.run('Tarta de Fresa', 15.00, 2); // 2 = Pastelería
-    insert.run('Barra de Pan', 1.10, 3);    // 3 = Panadería
-    insert.run('Café con Leche', 1.40, 4);  // 4 = Cafetería
-
-
+    insert.run('Croissant', 1.50, 1);
+    insert.run('Tarta de Fresa', 15.00, 2);
+    insert.run('Barra de Pan', 1.10, 3);
+    insert.run('Café con Leche', 1.40, 4);
   }
 
-  // Insertar datos por defecto si está vacía
-  const count = db.prepare('SELECT COUNT(*) as total FROM settings').get();
-  if (count.total === 0) {
+  // Sembrado de datos (Settings)
+  const countSettings = db.prepare('SELECT COUNT(*) as total FROM settings').get();
+  if (countSettings.total === 0) {
     const insert = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)');
     insert.run('business_name', 'DULCE PASTELERÍA SL');
     insert.run('business_nif', 'B-12345678');
@@ -103,28 +107,19 @@ export function initDB() {
     insert.run('business_phone', '+34 912 345 678');
     insert.run('ticket_footer', '¡Gracias por endulzarte con nosotros!');
   }
-  console.log("✅ Base de datos sembrada con productos iniciales");
 }
-//#region Funciones de base de datos para categorías
 
-// Añadir categoría con validación de nombre único
+// --- CATEGORÍAS ---
 export function addCategory(cat) {
-  // Comprobar si ya existe
-  const exists = db.prepare("SELECT id FROM categories WHERE LOWER(name) = LOWER(?)")
-    .get(cat.name);
+  const exists = db.prepare("SELECT id FROM categories WHERE LOWER(name) = LOWER(?)").get(cat.name);
   if (exists) throw new Error("Ya existe una categoría con ese nombre");
-
-  return db.prepare(`
-    INSERT INTO categories (name, icon, image_path) VALUES (?, ?, ?)
-  `).run(cat.name, cat.icon, cat.image_path);
+  return db.prepare(`INSERT INTO categories (name, icon, image_path) VALUES (?, ?, ?)`).run(cat.name, cat.icon, cat.image_path);
 }
 
-//obtener categorías
 export function getCategories() {
   return db.prepare('SELECT * FROM categories').all();
 }
 
-// Obtener solo categorías que tengan al menos un producto activo
 export function getActiveCategories() {
   return db.prepare(`
     SELECT DISTINCT c.* FROM categories c
@@ -133,26 +128,22 @@ export function getActiveCategories() {
   `).all();
 }
 
-//  Actualizar categoría existente
 export function updateCategory(cat) {
-  return db.prepare(`
-    UPDATE categories SET name = ?, icon = ?, image_path = ? WHERE id = ?
-  `).run(cat.name, cat.icon, cat.image_path, cat.id);
+  return db.prepare(`UPDATE categories SET name = ?, icon = ?, image_path = ? WHERE id = ?`).run(cat.name, cat.icon, cat.image_path, cat.id);
 }
-// Borrar solo si no tiene productos
+
 export function deleteCategory(id) {
   const hasProducts = db.prepare("SELECT id FROM products WHERE category_id = ? LIMIT 1").get(id);
   if (hasProducts) throw new Error("No puedes borrar una categoría que contiene productos");
-
   return db.prepare("DELETE FROM categories WHERE id = ?").run(id);
 }
-//#endregion
 
-
-
-export function saveSale({ cart, total }) { // <--- Desestructuramos aquí
-  const transaction = db.transaction((cartItems, totalAmount) => {
-    const stmt = db.prepare('INSERT INTO sales (total) VALUES (?)').run(totalAmount);
+// --- VENTAS (CORREGIDO) ---
+// Aquí estaba el error: la función no aceptaba ni guardaba el session_id
+export function saveSale({ cart, total, session_id }) {
+  const transaction = db.transaction((cartItems, totalAmount, sessionId) => {
+    // Insertamos la venta vinculándola a la sesión activa
+    const stmt = db.prepare('INSERT INTO sales (total, session_id) VALUES (?, ?)').run(totalAmount, sessionId);
     const saleId = stmt.lastInsertRowid;
 
     const insertItem = db.prepare(`
@@ -167,105 +158,65 @@ export function saveSale({ cart, total }) { // <--- Desestructuramos aquí
     return saleId;
   });
 
-  // Pasamos el array y el número por separado a la transacción interna
-  const id = transaction(cart, total);
-  return { id }; // Devolvemos un objeto con el ID
+  // Pasamos los 3 parámetros a la transacción
+  const id = transaction(cart, total, session_id);
+  return { id, success: true };
 }
 
+// --- PRODUCTOS ---
 export function getProducts() {
   return db.prepare('SELECT * FROM products').all();
 }
 
-// Obtener total de ventas de HOY
 export function getDailySales() {
-  const row = db.prepare(`
-    SELECT SUM(total) as dailyTotal 
-    FROM sales 
-    WHERE date >= date('now', 'start of day')
-  `).get();
+  const row = db.prepare(`SELECT SUM(s.total) as dailyTotal FROM sales s JOIN cash_sessions cs ON s.session_id = cs.id  WHERE cs.status != 'ARCHIVED'`).get();
   return row.dailyTotal || 0;
 }
 
-// Añadir un nuevo producto
 export function addProduct(p) {
   return db.prepare('INSERT INTO products (name, price, category_id) VALUES (?, ?, ?)')
     .run(p.name, p.price, p.category_id);
 }
-// Actualizar el precio de un producto por su nombre
+
 export function updateProduct(p) {
-  const stmt = db.prepare(`
-    UPDATE products 
-    SET name = ?, price = ?, category_id = ?, image_path = ?
-    WHERE id = ?
-  `);
+  const stmt = db.prepare(`UPDATE products SET name = ?, price = ?, category_id = ?, image_path = ? WHERE id = ?`);
   return stmt.run(p.name, p.price, p.category_id, p.image_path, p.id);
 }
 
-//Cambiar el estado activo/inactivo de un producto
 export function toggleProductStatus(id, status) {
-  // status será 0 para desactivar, 1 para activar
   const stmt = db.prepare('UPDATE products SET active = ? WHERE id = ?');
   return stmt.run(status, id);
 }
 
-// Obtener productos con el nombre de su categoría FUNCION PARA ADMINISTRACION: MUESTRA TODOS LOS PRODUCTOS
 export function getProductsWithCategory() {
-  return db.prepare(`
-    SELECT p.*, c.name as category_name 
-    FROM products p 
-    JOIN categories c ON p.category_id = c.id
-  `).all();
+  return db.prepare(`SELECT p.*, c.name as category_name FROM products p JOIN categories c ON p.category_id = c.id`).all();
 }
 
-// Func para obtener productos activos con el nombre de su categoría Para SalesView: Muestra solo lo disponible
 export function getActiveProductsWithCategory() {
-  return db.prepare(`
-    SELECT p.*, c.name as category_name 
-    FROM products p 
-    INNER JOIN categories c ON p.category_id = c.id
-    WHERE p.active = 1
-  `).all();
+  return db.prepare(`SELECT p.*, c.name as category_name FROM products p INNER JOIN categories c ON p.category_id = c.id WHERE p.active = 1`).all();
 }
-// Función para obtener la configuración
+
+// --- SETTINGS ---
 export function getSettings() {
   const rows = db.prepare('SELECT * FROM settings').all();
-  // Convertimos array de {key, value} a un objeto fácil de usar: { business_name: '...', ... }
   return rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {});
 }
 
 export function updateSettings(settings) {
   const stmt = db.prepare('UPDATE settings SET value = ? WHERE key = ?');
-  // Ejecutamos una actualización por cada campo
-  Object.entries(settings).forEach(([key, value]) => {
-    stmt.run(value, key);
-  });
-
+  Object.entries(settings).forEach(([key, value]) => { stmt.run(value, key); });
   return { success: true };
 }
 
-//==================================//
-//####### Historal de ventas #######//
-//==================================//
-// 1. Obtener lista general de ventas (resumen)
+// --- HISTORIAL ---
 export function getAllSales() {
-  return db.prepare(`
-    SELECT id, total, date 
-    FROM sales 
-    ORDER BY date DESC
-  `).all();
+  return db.prepare(`SELECT id, total, date FROM sales ORDER BY date DESC`).all();
 }
 
-// 2. Obtener los productos de una venta específica (para el detalle)
 export function getSaleItems(saleId) {
-  return db.prepare(`
-    SELECT si.*, p.name 
-    FROM sale_items si
-    JOIN products p ON si.product_id = p.id
-    WHERE si.sale_id = ?
-  `).all(saleId);
+  return db.prepare(`SELECT si.*, p.name FROM sale_items si JOIN products p ON si.product_id = p.id WHERE si.sale_id = ?`).all(saleId);
 }
 
-// 3. Productos más vendidos
 export function getTopProducts(limit = 5) {
   return db.prepare(`
     SELECT p.name, SUM(si.qty) as total_qty
@@ -277,47 +228,25 @@ export function getTopProducts(limit = 5) {
   `).all(limit);
 }
 
-
-// lógica de base de datos
 export function getSalesByHour() {
   return db.prepare(`
-    SELECT 
-      strftime('%H', date) as hour,
-      COUNT(id) as count,
-      SUM(total) as total_amount
+    SELECT strftime('%H', date) as hour, COUNT(id) as count, SUM(total) as total_amount
     FROM sales
     GROUP BY hour
     ORDER BY total_amount DESC
   `).all();
 }
 
-// 5. Ventas por rango de fechas (Día, Mes, Año o Personalizado)
 export function getSalesByRange(startDate, endDate) {
-  return db.prepare(`
-    SELECT id, total, date 
-    FROM sales 
-    WHERE date BETWEEN ? AND ?
-    ORDER BY date DESC
-  `).all(startDate, endDate);
+  return db.prepare(`SELECT id, total, date FROM sales WHERE date BETWEEN ? AND ? ORDER BY date DESC`).all(startDate, endDate);
 }
 
-// 6. Datos para gráfico de ventas diarias en un rango
 export function getDailySalesChart(startDate, endDate) {
-  return db.prepare(`
-    SELECT date(date) as day, SUM(total) as daily_total
-    FROM sales
-    WHERE date BETWEEN ? AND ?
-    GROUP BY day
-    ORDER BY day ASC
-  `).all(startDate, endDate);
+  return db.prepare(`SELECT date(date) as day, SUM(total) as daily_total FROM sales WHERE date BETWEEN ? AND ? GROUP BY day ORDER BY day ASC`).all(startDate, endDate);
 }
 
-
-//==================================//
-//####### cierre de caja #########//
-//==================================//
+// --- SESIONES Y CIERRE ---
 export function getActiveSession() {
-  // Buscamos la sesión que no tenga end_time o cuyo status sea OPEN
   return db.prepare("SELECT * FROM cash_sessions WHERE status = 'OPEN'").get();
 }
 
@@ -330,7 +259,7 @@ export function openSession({ user_name, initial_cash }) {
 }
 
 export function closeSession({ session_id, closing_cash }) {
- try {
+  try {
     const stmt = db.prepare(`
       UPDATE cash_sessions 
       SET end_time = CURRENT_TIMESTAMP, 
@@ -339,9 +268,147 @@ export function closeSession({ session_id, closing_cash }) {
       WHERE id = ? AND status = 'OPEN'
     `);
     const info = stmt.run(closing_cash, session_id);
-    return { success: info.changes > 0 }; // Devuelve un objeto simple, no el statement
+    return { success: info.changes > 0 };
   } catch (error) {
     console.error("Error SQL en closeSession:", error);
     throw error;
   }
 }
+export function getActiveSessionSales() {
+  const session = getActiveSession();
+  if (!session) return 0;
+
+  const row = db.prepare(`
+    SELECT SUM(total) as sessionTotal
+    FROM sales
+    WHERE session_id = ?
+  `).get(session.id);
+  return row.sessionTotal || 0;
+}
+
+export function getZReportData() {
+  // Obtenemos sesiones cerradas
+  const sessions = db.prepare(`
+    SELECT id, user_name, initial_cash, closing_cash, (closing_cash - initial_cash) as net_cash
+    FROM cash_sessions 
+    WHERE status = 'CLOSED'
+  `).all();
+
+  if (sessions.length === 0) {
+    return { sessions: [], total_sales: 0, sales_count: 0, date: new Date().toISOString() };
+  }
+
+  const sessionIds = sessions.map(s => s.id).join(',');
+
+  const salesSummary = db.prepare(`
+    SELECT SUM(total) as total_sales, COUNT(*) as count 
+    FROM sales 
+    WHERE session_id IN (${sessionIds})
+  `).get();
+
+  return {
+    sessions,
+    total_sales: salesSummary.total_sales || 0,
+    sales_count: salesSummary.count || 0,
+    date: new Date().toISOString()
+  };
+}
+
+// database.js
+
+export function getXReportData(sessionId) {
+  const session = db.prepare(`
+    SELECT id, user_name, start_time, end_time, initial_cash, closing_cash 
+    FROM cash_sessions 
+    WHERE id = ?
+  `).get(sessionId);
+
+  const sales = db.prepare(`
+    SELECT IFNULL(SUM(total), 0) as total_sales, COUNT(*) as count 
+    FROM sales 
+    WHERE session_id = ?
+  `).get(sessionId);
+
+  return {
+    ...session,
+    total_sales: sales.total_sales,
+    sales_count: sales.count,
+    expected_cash: session.initial_cash + sales.total_sales
+  };
+}
+
+export function archiveSessions(sessionIds) {
+  try {
+    // sessionIds será un array de números [1, 2, 3...]
+    const placeholders = sessionIds.map(() => '?').join(',');
+    const stmt = db.prepare(`
+      UPDATE cash_sessions 
+      SET status = 'ARCHIVED' 
+      WHERE id IN (${placeholders})
+    `);
+
+    const info = stmt.run(...sessionIds);
+    return { success: true, count: info.changes };
+  } catch (error) {
+    console.error("Error al archivar sesiones:", error);
+    throw error;
+  }
+}
+
+
+export function closeDayAndSession({ session_id, closing_cash }) {
+  const transaction = db.transaction(() => {
+    // 1. Primero cerramos la sesión actual del empleado (Cierre X automático)
+    const stmtClose = db.prepare(`
+      UPDATE cash_sessions 
+      SET end_time = CURRENT_TIMESTAMP, 
+          closing_cash = ?, 
+          status = 'CLOSED' 
+      WHERE id = ? AND status = 'OPEN'
+    `);
+    stmtClose.run(closing_cash, session_id);
+
+    // 2. Obtenemos los datos para el Reporte Z (incluyendo la que acabamos de cerrar)
+    const sessions = db.prepare(`
+      SELECT id, user_name, initial_cash, closing_cash 
+      FROM cash_sessions 
+      WHERE status = 'CLOSED'
+    `).all();
+
+    const sessionIds = sessions.map(s => s.id).join(',');
+    const summary = db.prepare(`
+      SELECT SUM(total) as total_sales, COUNT(*) as count 
+      FROM sales 
+      WHERE session_id IN (${sessionIds})
+    `).get();
+
+    return {
+      sessions,
+      total_sales: summary.total_sales || 0,
+      sales_count: summary.count || 0,
+      date: new Date().toISOString()
+    };
+  });
+
+  return transaction();
+}
+
+
+export function getExpectedCash(sessionId) {
+  try {
+    // 1. Obtenemos el fondo inicial
+    const session = db.prepare('SELECT initial_cash FROM cash_sessions WHERE id = ?').get(sessionId);
+
+    // 2. Sumamos las ventas de esa sesión
+    const sales = db.prepare('SELECT SUM(total) as total_sales FROM sales WHERE session_id = ?').get(sessionId);
+
+    const initial = session?.initial_cash || 0;
+    const totalSales = sales?.total_sales || 0;
+
+    return initial + totalSales;
+  } catch (error) {
+    console.error("Error al calcular efectivo esperado:", error);
+    return 0;
+  }
+}
+

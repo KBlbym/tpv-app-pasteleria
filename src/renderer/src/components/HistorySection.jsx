@@ -32,7 +32,6 @@ export default function HistorySection() {
   // 3. función dedicada solo a las estadísticas
   const loadStats = async (limit) => {
     const s = await window.electronAPI.getStats(limit);
-    console.log("Datos para el gráfico de horas:", s.hourlyData); // Revisa esto en la consola
     setStats(s);
   };
 
@@ -73,6 +72,7 @@ export default function HistorySection() {
     await window.electronAPI.printTicket(printData);
     alert("Re-impresión enviada a la impresora.");
   };
+  const totalSales = sales.reduce((acc, sale) => acc + sale.total, 0);
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-20">
@@ -231,7 +231,22 @@ export default function HistorySection() {
                   </tr>
                 )}
               </tbody>
+              <tfoot className="sticky bottom-0 bg-white border-t border-slate-200">
+                <tr className="text-sm font-black text-slate-800">
+                  <td className="p-6" colSpan="2">
+                    TOTAL
+                  </td>
+                  <td className="p-6 text-right text-lg text-orange-600">
+                    {totalSales.toFixed(2)}€
+                  </td>
+                </tr>
+              </tfoot>
             </table>
+
+
+            
+
+
           </div>
         </div>
 

@@ -9,7 +9,6 @@ export default function InventorySection({ products, categories, onRefresh }) {
 
   // --- LÓGICA DE IMÁGENES ---
   const handleImageUpload = async (e, type) => {
-    console.log("Subiendo imagen para:", e.target.files[0]);
     const file = e.target.files[0];
     if (!file) return;
 

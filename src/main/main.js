@@ -6,14 +6,20 @@ import { fileURLToPath } from 'url';
 import {
   initDB, getProducts, saveSale, getDailySales, addProduct, getCategories, getProductsWithCategory,
   getSettings, updateSettings, updateProduct, getActiveProductsWithCategory, toggleProductStatus,
-  getAllSales, getSaleItems, getTopProducts, getSalesByHour, getSalesByRange, getDailySalesChart, 
+  getAllSales, getSaleItems, getTopProducts, getSalesByHour, getSalesByRange, getDailySalesChart,
   addCategory,
-  updateCategory, 
-  deleteCategory, 
+  updateCategory,
+  deleteCategory,
   getActiveCategories,
   getActiveSession,
   openSession,
-  closeSession
+  closeSession,
+  getZReportData, getXReportData, 
+  archiveSessions,
+  closeDayAndSession,
+  getExpectedCash,
+  getActiveSessionSales
+
 
 } from './services/database.js';
 import { printTicket } from './services/printer.js';
@@ -60,30 +66,30 @@ function createWindow() {
 
 // Inicialización de la App
 app.whenReady().then(() => {
-// Implementar el manejador del protocolo
-protocol.handle('safe-protocol', (request) => {
-  try {
-    // request.url será algo como "safe-protocol://1770163582587-coca-cola.png"
-    const url = new URL(request.url);
+  // Implementar el manejador del protocolo
+  protocol.handle('safe-protocol', (request) => {
+    try {
+      // request.url será algo como "safe-protocol://1770163582587-coca-cola.png"
+      const url = new URL(request.url);
 
-    // El nombre del archivo es el "host" o el "pathname" dependiendo de cómo se escriba
-    // Con safe-protocol://archivo.png, el archivo es url.host
-    const fileName = url.host;
+      // El nombre del archivo es el "host" o el "pathname" dependiendo de cómo se escriba
+      // Con safe-protocol://archivo.png, el archivo es url.host
+      const fileName = url.host;
 
-    const fullPath = path.join(IMAGES_DIR, fileName);
+      const fullPath = path.join(IMAGES_DIR, fileName);
 
-    // Verificamos si el archivo existe antes de intentar leerlo
-    if (!fs.existsSync(fullPath)) {
-      console.error("Archivo no encontrado en el disco:", fullPath);
-      return new Response("Not Found", { status: 404 });
+      // Verificamos si el archivo existe antes de intentar leerlo
+      if (!fs.existsSync(fullPath)) {
+        console.error("Archivo no encontrado en el disco:", fullPath);
+        return new Response("Not Found", { status: 404 });
+      }
+
+      return net.fetch(`file://${fullPath}`);
+    } catch (error) {
+      console.error("Error en el protocolo safe-protocol:", error);
+      return new Response("Error", { status: 500 });
     }
-
-    return net.fetch(`file://${fullPath}`);
-  } catch (error) {
-    console.error("Error en el protocolo safe-protocol:", error);
-    return new Response("Error", { status: 500 });
-  }
-});
+  });
   initDB(); // Arrancamos SQLite y creamos tablas si no existen
   createWindow();
 
@@ -123,7 +129,7 @@ ipcMain.handle('db:delete-category', async (event, id) => {
     return deleteCategory(id);
   } catch (error) {
     // El error lanzado en database.js llega aquí y se envía al frontend
-    throw new Error(error.message); 
+    throw new Error(error.message);
   }
 });
 
@@ -141,7 +147,6 @@ ipcMain.handle('db:save-sale', async (event, saleData) => {
     // 1. Guardar en DB (Esto ya funciona por lo que veo en tus logs)
     const result = await saveSale(saleData);
     savedId = result.id;
-    console.log("Venta guardada con ID:", savedId);
   } catch (dbError) {
     console.error("Error en DB:", dbError);
     return { success: false, error: "Error al guardar en base de datos" };
@@ -157,11 +162,20 @@ ipcMain.handle('db:save-sale', async (event, saleData) => {
   // 3. RETORNO FINAL: Siempre devolvemos éxito si la DB funcionó
   return { success: true, id: savedId };
 });
-
+getActiveSessionSales
 // 3. Obtener total de ventas de hoy (Fase 2)
 ipcMain.handle('db:get-daily-sales', async () => {
   try {
     return getDailySales();
+  } catch (error) {
+    console.error("Error en estadísticas:", error);
+    return 0;
+  }
+});
+
+ipcMain.handle('db:get-active-session-sales', async () => {
+  try {
+    return getActiveSessionSales();
   } catch (error) {
     console.error("Error en estadísticas:", error);
     return 0;
@@ -268,7 +282,6 @@ ipcMain.handle('db:get-all-sales', async () => getAllSales());
 // Obtener los items de una venta específica
 ipcMain.handle('db:get-sale-items', async (event, saleId) => {
   try {
-    console.log("Buscando items para la venta ID:", saleId); // Para debugear
     if (!saleId) throw new Error("ID de venta no proporcionado");
     return getSaleItems(saleId);
   } catch (error) {
@@ -276,6 +289,8 @@ ipcMain.handle('db:get-sale-items', async (event, saleId) => {
     throw error;
   }
 });
+ipcMain.handle('db:get-x-report', async (event, id) => getXReportData(id));
+
 
 //Obtener estadísticas
 ipcMain.handle('db:get-stats', async (event, limit) => {
@@ -313,8 +328,17 @@ ipcMain.handle('db:open-session', async (event, data) => {
 });
 
 ipcMain.handle('db:close-session', async (event, data) => {
-  const result = await closeSession(data); 
+  const result = await closeSession(data);
   return result;
 });
-
+ipcMain.handle('db:get-z-report', async () => {
+  return getZReportData();
+});
+ipcMain.handle('db:archive-sessions', async (event, ids) => {
+  return archiveSessions(ids);
+});
+ipcMain.handle('db:close-day-session', async (event, data) => {
+  return closeDayAndSession(data);
+});
+ipcMain.handle('db:get-expected-cash', async (event, id) => getExpectedCash(id));
 //#endregion
