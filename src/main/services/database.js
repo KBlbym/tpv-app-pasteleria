@@ -245,6 +245,8 @@ export function getDailySalesChart(startDate, endDate) {
   return db.prepare(`SELECT date(date) as day, SUM(total) as daily_total FROM sales WHERE date BETWEEN ? AND ? GROUP BY day ORDER BY day ASC`).all(startDate, endDate);
 }
 
+
+
 // --- SESIONES Y CIERRE ---
 export function getActiveSession() {
   return db.prepare("SELECT * FROM cash_sessions WHERE status = 'OPEN'").get();
@@ -314,7 +316,6 @@ export function getZReportData() {
   };
 }
 
-// database.js
 
 export function getXReportData(sessionId) {
   const session = db.prepare(`
@@ -355,6 +356,60 @@ export function archiveSessions(sessionIds) {
   }
 }
 
+export function getArchivedReports() {
+  // Obtenemos un resumen de los cierres agrupados por fecha de fin
+  // Esto nos dará una lista de qué días se cerraron y cuánto se vendió
+  return db.prepare(`
+    SELECT 
+      DATE(end_time) as close_date,
+      COUNT(id) as sessions_count,
+      SUM(initial_cash) as total_initial,
+      SUM(closing_cash) as total_closing,
+      (SELECT SUM(total) FROM sales WHERE session_id IN (SELECT id FROM cash_sessions WHERE DATE(end_time) = DATE(cs.end_time) AND status = 'ARCHIVED')) as sales_total
+    FROM cash_sessions cs
+    WHERE status = 'ARCHIVED'
+    GROUP BY DATE(end_time)
+    ORDER BY close_date DESC
+  `).all();
+}
+
+
+// 1. Listado para la tabla
+export function getArchivedHistory() {
+    return db.prepare(`
+        SELECT 
+            DATE(end_time) as date,
+            COUNT(id) as session_count,
+            SUM(closing_cash) as total_cash
+        FROM cash_sessions
+        WHERE status = 'ARCHIVED'
+        GROUP BY DATE(end_time)
+        ORDER BY date DESC
+    `).all();
+}
+
+// 2. Detalle para re-imprimir un reporte Z pasado
+export function getPastZReport(date) {
+    const sessions = db.prepare(`
+        SELECT id, user_name, initial_cash, closing_cash
+        FROM cash_sessions
+        WHERE DATE(end_time) = ? AND status = 'ARCHIVED'
+    `).all(date);
+
+    const sessionIds = sessions.map(s => s.id).join(',');
+    const sales = db.prepare(`
+        SELECT IFNULL(SUM(total), 0) as total_sales, COUNT(*) as count 
+        FROM sales 
+        WHERE session_id IN (${sessionIds})
+    `).get();
+
+    return {
+        date,
+        sessions,
+        total_sales: sales.total_sales,
+        sales_count: sales.count
+    };
+}
 
 export function closeDayAndSession({ session_id, closing_cash }) {
   const transaction = db.transaction(() => {

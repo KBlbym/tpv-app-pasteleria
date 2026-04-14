@@ -18,11 +18,13 @@ import {
   archiveSessions,
   closeDayAndSession,
   getExpectedCash,
-  getActiveSessionSales
+  getActiveSessionSales,
+  getArchivedHistory, getPastZReport
 
 
 } from './services/database.js';
 import { printTicket } from './services/printer.js';
+import { printSaleTicket, printReportX, printReportZ } from './services/printerService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -215,6 +217,9 @@ ipcMain.handle('print:test', async () => {
     return { success: false, error: error.message };
   }
 });
+
+
+
 // 6. Manejador para obtener categorías (para el selector del formulario)
 ipcMain.handle('db:get-categories', async () => {
   try {
@@ -341,4 +346,16 @@ ipcMain.handle('db:close-day-session', async (event, data) => {
   return closeDayAndSession(data);
 });
 ipcMain.handle('db:get-expected-cash', async (event, id) => getExpectedCash(id));
+//#endregion
+
+//#region  historial de sesiones y reportes Z pasados
+ipcMain.handle('db:get-archived-history', async () => getArchivedHistory());
+ipcMain.handle('db:get-past-z-report', async (event, date) => getPastZReport(date));
+//#endregion
+
+//#region  CONFIGURACIÓN DE IMPRESIÓN DESDE EL BACKEND (Fase 4)
+ipcMain.handle('print:sale', (event, data) => printSaleTicket(data));
+ipcMain.handle('print:reportX', (event, data) => printReportX(data));
+ipcMain.handle('print:reportZ', (event, data) => printReportZ(data));
+
 //#endregion

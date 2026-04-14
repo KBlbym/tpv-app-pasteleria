@@ -83,6 +83,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getExpectedCash: (id) => ipcRenderer.invoke('db:get-expected-cash', id),
   getActiveSessionSales: () => ipcRenderer.invoke('db:get-active-session-sales'),
   getXReport: (id) => ipcRenderer.invoke('db:get-x-report', id),
+  getArchivedHistory: () => ipcRenderer.invoke('db:get-archived-history'),
+  getPastZReport: (date) => ipcRenderer.invoke('db:get-past-z-report', date),
+  printSale: (data) => ipcRenderer.invoke('print:sale', data),
+  printReportX: (data) => ipcRenderer.invoke('print:reportX', data),
+  printReportZ: (data) => ipcRenderer.invoke('print:reportZ', data),
 
 });
 
