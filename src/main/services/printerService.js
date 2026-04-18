@@ -16,7 +16,7 @@ const executePrint = (printJob) => {
       }
       // Ejecutamos el diseño específico
       printJob(printer, settings);
-      
+
       printer.feed(3).cut().close();
     });
   } catch (err) {
@@ -48,6 +48,16 @@ export function printSaleTicket(saleData) {
       .text('--------------------------------')
       .align('rt').style('b').size(1, 1)
       .text(`TOTAL: ${saleData.total.toFixed(2)}€`)
+      .text(`PAGO:  ${saleData.payment_method === 'CASH' ? 'EFECTIVO' : 'TARJETA'}`)
+
+    if (saleData.payment_method === 'CASH') {
+      printer
+        .text(`ENTREGADO: ${saleData.cashReceived.toFixed(2)}€`)
+        .style('b')
+        .text(`CAMBIO:    ${saleData.change.toFixed(2)}€`)
+        .style('normal');
+    }
+    printer
       .feed(1).align('ct').style('normal').size(0, 0)
       .text(settings.ticket_footer || 'Gracias por su visita');
   });

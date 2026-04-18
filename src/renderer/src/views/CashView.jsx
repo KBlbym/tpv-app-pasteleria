@@ -76,24 +76,6 @@ export default function CashView({ activeSession, onRefresh }) {
         }
     };
 
-    // const handleCloseFinal = async () => {
-    //     if (!closingCash) return alert("Introduce el efectivo");
-    //     const amount = parseFloat(closingCash);
-
-    //     // Validamos descuadre solo como aviso
-    //     const proceed = await validateCashGap(activeSession.id, amount);
-    //     if (!proceed) return;
-
-    //     try {
-    //         await window.electronAPI.closeSession({
-    //             session_id: activeSession.id,
-    //             closing_cash: amount
-    //         });
-    //         setIsClosing(false);
-    //         setClosingCash('');
-    //         setTimeout(() => onRefresh(), 100);
-    //     } catch (err) { alert("Error: " + err.message); }
-    // };
 
     const handleCloseFinal = async () => {
         if (!closingCash) return alert("Introduce el efectivo");

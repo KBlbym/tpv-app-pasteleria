@@ -68,14 +68,31 @@ export function initDB() {
   try {
     db.prepare("ALTER TABLE products ADD COLUMN image_path TEXT").run();
     db.prepare("ALTER TABLE categories ADD COLUMN image_path TEXT").run();
+    db.prepare("ALTER TABLE sales ADD COLUMN session_id INTEGER").run();
+    //db.prepare(`ALTER TABLE sales ADD COLUMN payment_method TEXT DEFAULT 'CASH'`).run();
   } catch (e) { }
 
-  try {
-    // ERROR CORREGIDO: Aseguramos que la columna session_id exista en sales si la tabla ya fue creada antes
-    db.prepare("ALTER TABLE sales ADD COLUMN session_id INTEGER").run();
-  } catch (error) {
-    // Si ya existe, no hacemos nada
+ try {
+  db.prepare(`ALTER TABLE sales ADD COLUMN payment_method TEXT DEFAULT 'CASH'`).run();
+  console.log("Columna payment_method añadida con éxito.");
+} catch (err) {
+  if (err.message.includes("duplicate column name")) {
+    // La columna ya existía, no hacemos nada
+  } else {
+    console.error("Error al actualizar tabla sales:", err);
   }
+}
+
+try {
+  db.prepare(`ALTER TABLE sale_items ADD COLUMN name TEXT DEFAULT 'CASH'`).run();
+  console.log("Columna name añadida con éxito.");
+} catch (err) {
+  if (err.message.includes("duplicate column name")) {
+    // La columna ya existía, no hacemos nada
+  } else {
+    console.error("Error al actualizar tabla sale_items:", err);
+  }
+}
 
   // Sembrado de datos (Categorías)
   const countCategories = db.prepare('SELECT COUNT(*) as total FROM categories').get();
@@ -140,27 +157,64 @@ export function deleteCategory(id) {
 
 // --- VENTAS (CORREGIDO) ---
 // Aquí estaba el error: la función no aceptaba ni guardaba el session_id
-export function saveSale({ cart, total, session_id }) {
-  const transaction = db.transaction((cartItems, totalAmount, sessionId) => {
-    // Insertamos la venta vinculándola a la sesión activa
-    const stmt = db.prepare('INSERT INTO sales (total, session_id) VALUES (?, ?)').run(totalAmount, sessionId);
-    const saleId = stmt.lastInsertRowid;
+// export function saveSale({ cart, total, session_id }) {
+//   const transaction = db.transaction((cartItems, totalAmount, sessionId) => {
+//     // Insertamos la venta vinculándola a la sesión activa
+//     const stmt = db.prepare('INSERT INTO sales (total, session_id) VALUES (?, ?)').run(totalAmount, sessionId);
+//     const saleId = stmt.lastInsertRowid;
 
-    const insertItem = db.prepare(`
-      INSERT INTO sale_items (sale_id, product_id, qty, price) 
+//     const insertItem = db.prepare(`
+//       INSERT INTO sale_items (sale_id, product_id, qty, price) 
+//       VALUES (?, ?, ?, ?)
+//     `);
+
+//     for (const item of cartItems) {
+//       insertItem.run(saleId, item.id, item.qty, item.price);
+//     }
+
+//     return saleId;
+//   });
+
+//   // Pasamos los 3 parámetros a la transacción
+//   const id = transaction(cart, total, session_id);
+//   return { id, success: true };
+// }
+
+export function saveSale(saleData) {
+  console.log("Guardando venta con datos:", saleData);
+  const { total, cart, session_id, payment_method, date } = saleData;
+
+  // Creamos una transacción para asegurar que se guarde TODO o NADA
+  const executeSale = db.transaction((saleItems) => {
+    // 1. Insertamos la venta principal
+    const saleInfo = db.prepare(`
+      INSERT INTO sales (total, session_id, payment_method, date)
       VALUES (?, ?, ?, ?)
+    `).run(total, session_id, payment_method, date || new Date().toISOString());
+
+    const saleId = saleInfo.lastInsertRowid;
+
+    // 2. Insertamos cada producto del carrito en la tabla sale_items
+    const insertItem = db.prepare(`
+      INSERT INTO sale_items (sale_id, product_id, name, qty, price)
+      VALUES (?, ?, ?, ?, ?)
     `);
 
-    for (const item of cartItems) {
-      insertItem.run(saleId, item.id, item.qty, item.price);
+    for (const item of saleItems) {
+      insertItem.run(saleId, item.id, item.name, item.qty, item.price);
+      
     }
 
     return saleId;
   });
 
-  // Pasamos los 3 parámetros a la transacción
-  const id = transaction(cart, total, session_id);
-  return { id, success: true };
+  try {
+    const id = executeSale(cart);
+    return { success: true, id };
+  } catch (error) {
+    console.error("Error crítico en la transacción de venta:", error);
+    return { success: false, error: error.message };
+  }
 }
 
 // --- PRODUCTOS ---
@@ -242,7 +296,11 @@ export function getSalesByRange(startDate, endDate) {
 }
 
 export function getDailySalesChart(startDate, endDate) {
-  return db.prepare(`SELECT date(date) as day, SUM(total) as daily_total FROM sales WHERE date BETWEEN ? AND ? GROUP BY day ORDER BY day ASC`).all(startDate, endDate);
+  const n = 15;
+ const ventas = db.prepare("SELECT * FROM sales WHERE total > ?").all(n);
+  const row =  db.prepare(`SELECT date(date) as day, SUM(total) as daily_total FROM sales WHERE date BETWEEN ? AND ? GROUP BY day ORDER BY day ASC`).all(startDate, endDate);
+  console.log("Dato de ventas: " ,ventas);
+  console.log("Dato de chart: " ,row);
 }
 
 
@@ -376,7 +434,7 @@ export function getArchivedReports() {
 
 // 1. Listado para la tabla
 export function getArchivedHistory() {
-    return db.prepare(`
+  return db.prepare(`
         SELECT 
             DATE(end_time) as date,
             COUNT(id) as session_count,
@@ -390,25 +448,25 @@ export function getArchivedHistory() {
 
 // 2. Detalle para re-imprimir un reporte Z pasado
 export function getPastZReport(date) {
-    const sessions = db.prepare(`
+  const sessions = db.prepare(`
         SELECT id, user_name, initial_cash, closing_cash
         FROM cash_sessions
         WHERE DATE(end_time) = ? AND status = 'ARCHIVED'
     `).all(date);
 
-    const sessionIds = sessions.map(s => s.id).join(',');
-    const sales = db.prepare(`
+  const sessionIds = sessions.map(s => s.id).join(',');
+  const sales = db.prepare(`
         SELECT IFNULL(SUM(total), 0) as total_sales, COUNT(*) as count 
         FROM sales 
         WHERE session_id IN (${sessionIds})
     `).get();
 
-    return {
-        date,
-        sessions,
-        total_sales: sales.total_sales,
-        sales_count: sales.count
-    };
+  return {
+    date,
+    sessions,
+    total_sales: sales.total_sales,
+    sales_count: sales.count
+  };
 }
 
 export function closeDayAndSession({ session_id, closing_cash }) {

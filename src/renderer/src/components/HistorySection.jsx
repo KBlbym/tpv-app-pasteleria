@@ -42,6 +42,7 @@ export default function HistorySection() {
     };
     const data = await window.electronAPI.getSalesRange(range);
     const chart = await window.electronAPI.getDailySalesChart(range);
+    
 
     // Formateamos la fecha para que el gráfico se vea limpio (DD/MM)
     const formattedChart = chart.map(d => ({
@@ -50,6 +51,8 @@ export default function HistorySection() {
     }));
     setSales(data);
     setChartData(formattedChart);
+    console.log("·Data: ", data)
+    console.log("chartdata: ", chartData )
     setSelectedSale(null);
   };
 
