@@ -77,6 +77,7 @@ export function initDB() {
     // Si ya existe, no hacemos nada
   }
 
+
   // Sembrado de datos (Categorías)
   const countCategories = db.prepare('SELECT COUNT(*) as total FROM categories').get();
   if (countCategories.total === 0) {
@@ -140,10 +141,10 @@ export function deleteCategory(id) {
 
 // --- VENTAS (CORREGIDO) ---
 // Aquí estaba el error: la función no aceptaba ni guardaba el session_id
-export function saveSale({ cart, total, session_id }) {
-  const transaction = db.transaction((cartItems, totalAmount, sessionId) => {
-    // Insertamos la venta vinculándola a la sesión activa
-    const stmt = db.prepare('INSERT INTO sales (total, session_id) VALUES (?, ?)').run(totalAmount, sessionId);
+export function saveSale({ cart, total, session_id, payment_method }) {
+  const transaction = db.transaction((cartItems, totalAmount, sessionId, method) => {
+    // Insertamos la venta incluyendo el método de pago
+    const stmt = db.prepare('INSERT INTO sales (total, session_id, payment_method) VALUES (?, ?, ?)').run(totalAmount, sessionId, method);
     const saleId = stmt.lastInsertRowid;
 
     const insertItem = db.prepare(`
@@ -158,8 +159,7 @@ export function saveSale({ cart, total, session_id }) {
     return saleId;
   });
 
-  // Pasamos los 3 parámetros a la transacción
-  const id = transaction(cart, total, session_id);
+  const id = transaction(cart, total, session_id, payment_method);
   return { id, success: true };
 }
 
@@ -210,7 +210,7 @@ export function updateSettings(settings) {
 
 // --- HISTORIAL ---
 export function getAllSales() {
-  return db.prepare(`SELECT id, total, date FROM sales ORDER BY date DESC`).all();
+  return db.prepare(`SELECT id, total, date, payment_method FROM sales ORDER BY date DESC`).all();
 }
 
 export function getSaleItems(saleId) {
@@ -238,7 +238,12 @@ export function getSalesByHour() {
 }
 
 export function getSalesByRange(startDate, endDate) {
-  return db.prepare(`SELECT id, total, date FROM sales WHERE date BETWEEN ? AND ? ORDER BY date DESC`).all(startDate, endDate);
+  return db.prepare(`
+    SELECT id, total, date, payment_method 
+    FROM sales 
+    WHERE date BETWEEN ? AND ? 
+    ORDER BY date DESC
+  `).all(startDate, endDate);
 }
 
 export function getDailySalesChart(startDate, endDate) {
@@ -466,4 +471,11 @@ export function getExpectedCash(sessionId) {
     return 0;
   }
 }
-
+export function getSalesTotalsByMethod(sessionId) {
+  return db.prepare(`
+    SELECT payment_method, SUM(total) as total 
+    FROM sales 
+    WHERE session_id = ? 
+    GROUP BY payment_method
+  `).all(sessionId);
+}
