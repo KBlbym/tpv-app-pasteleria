@@ -254,61 +254,74 @@ export default function HistorySection() {
         </div>
 
         {/* PANEL DE DETALLE (TICKET) */}
-        <div className="lg:col-span-2">
-          {selectedSale ? (
-            <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-2xl overflow-hidden animate-in slide-in-from-right-4 duration-300">
-              <div className="bg-slate-900 p-8 text-white">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h4 className="text-[10px] font-black text-orange-400 uppercase tracking-[0.2em] mb-1">Resumen de Venta</h4>
-                    <p className="text-3xl font-black">{selectedSale.total.toFixed(2)}€</p>
-                  </div>
-                  <button
-                    onClick={handleReprint}
-                    className="p-4 bg-white/10 rounded-2xl hover:bg-orange-500 transition-all active:scale-90"
-                    title="Imprimir Copia"
-                  >
-                    🖨️
-                  </button>
-                </div>
-              </div>
+        
+{/* PANEL DE DETALLE (TICKET) */}
+<div className="lg:col-span-2">
+  {selectedSale ? (
+    <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-2xl overflow-hidden animate-in slide-in-from-right-4 duration-300">
+      <div className="bg-slate-900 p-8 text-white">
+        <div className="flex justify-between items-start">
+          <div>
+            <h4 className="text-[10px] font-black text-orange-400 uppercase tracking-[0.2em] mb-1">Resumen de Venta</h4>
+            <p className="text-3xl font-black">{selectedSale.total.toFixed(2)}€</p>
+          </div>
+          <button
+            onClick={handleReprint}
+            className="p-4 bg-white/10 rounded-2xl hover:bg-orange-500 transition-all active:scale-90"
+            title="Imprimir Copia"
+          >
+            🖨️
+          </button>
+        </div>
+      </div>
 
-              <div className="p-8">
-                <div className="space-y-4">
-                  <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b pb-2">Artículos</h5>
-                  {items.map((item, idx) => (
-                    <div key={idx} className="flex justify-between items-center">
-                      <div className="flex flex-col">
-                        <span className="text-sm font-bold text-slate-700">{item.name}</span>
-                        <span className="text-[10px] text-slate-400">{item.qty} x {item.price.toFixed(2)}€</span>
-                      </div>
-                      <span className="font-mono font-bold text-slate-600">
-                        {(item.qty * item.price).toFixed(2)}€
-                      </span>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="mt-10 pt-6 border-t border-dashed border-slate-200">
-                  <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase">
-                    <span>ID Transacción:</span>
-                    <span>{selectedSale.id}</span>
-                  </div>
-                  <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase mt-2">
-                    <span>Fecha:</span>
-                    <span>{new Date(selectedSale.date).toLocaleString()}</span>
-                  </div>
-                </div>
+      <div className="p-8">
+        <div className="space-y-4">
+          <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b pb-2">Artículos</h5>
+          {items.map((item, idx) => (
+            <div key={idx} className="flex justify-between items-center">
+              <div className="flex flex-col">
+                <span className="text-sm font-bold text-slate-700">{item.name}</span>
+                <span className="text-[10px] text-slate-400">{item.qty} x {item.price.toFixed(2)}€</span>
               </div>
+              <span className="font-mono font-bold text-slate-600">
+                {(item.qty * item.price).toFixed(2)}€
+              </span>
             </div>
-          ) : (
-            <div className="h-full min-h-[400px] border-2 border-dashed border-slate-200 rounded-[2.5rem] flex flex-col items-center justify-center p-10 text-center text-slate-300">
-              <div className="text-6xl mb-4 opacity-20">🧾</div>
-              <p className="font-bold text-sm uppercase tracking-widest opacity-40">Selecciona una venta<br />para ver el ticket</p>
-            </div>
-          )}
+          ))}
         </div>
 
+        {/* --- ESTE ES EL FRAGMENTO INTEGRADO --- */}
+        <div className="mt-10 pt-6 border-t border-dashed border-slate-200">
+          <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase mb-2">
+            <span>Método de Pago:</span>
+            <span className="text-slate-900">
+              {selectedSale.payment_method === 'CASH' ? '💵 EFECTIVO' : '💳 TARJETA'}
+            </span>
+          </div>
+          
+          <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase">
+            <span>ID Transacción:</span>
+            <span className="text-slate-600">#{selectedSale.id.toString().padStart(5, '0')}</span>
+          </div>
+
+          <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase mt-2">
+            <span>Fecha y Hora:</span>
+            <span className="text-slate-600">{new Date(selectedSale.date).toLocaleString()}</span>
+          </div>
+        </div>
+        {/* --- FIN DEL FRAGMENTO --- */}
+      </div>
+    </div>
+  ) : (
+    <div className="h-full min-h-[400px] border-2 border-dashed border-slate-200 rounded-[2.5rem] flex flex-col items-center justify-center p-10 text-center text-slate-300">
+      <div className="text-6xl mb-4 opacity-20">🧾</div>
+      <p className="font-bold text-sm uppercase tracking-widest opacity-40">
+        Selecciona una venta<br />para ver el ticket
+      </p>
+    </div>
+  )}
+</div>
       </div>
       {/* --- MODAL DE DETALLES DEL PRODUCTO (Renderizar al final del return) --- */}
       {showProductModal && (

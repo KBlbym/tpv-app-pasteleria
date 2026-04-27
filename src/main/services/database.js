@@ -264,7 +264,7 @@ export function updateSettings(settings) {
 
 // --- HISTORIAL ---
 export function getAllSales() {
-  return db.prepare(`SELECT id, total, date FROM sales ORDER BY date DESC`).all();
+  return db.prepare(`SELECT id, total, date, payment_method FROM sales ORDER BY date DESC`).all();
 }
 
 export function getSaleItems(saleId) {
@@ -292,7 +292,12 @@ export function getSalesByHour() {
 }
 
 export function getSalesByRange(startDate, endDate) {
-  return db.prepare(`SELECT id, total, date FROM sales WHERE date BETWEEN ? AND ? ORDER BY date DESC`).all(startDate, endDate);
+  return db.prepare(`
+    SELECT id, total, date, payment_method 
+    FROM sales 
+    WHERE date BETWEEN ? AND ? 
+    ORDER BY date DESC
+  `).all(startDate, endDate);
 }
 
 export function getDailySalesChart(startDate, endDate) {
@@ -524,4 +529,11 @@ export function getExpectedCash(sessionId) {
     return 0;
   }
 }
-
+export function getSalesTotalsByMethod(sessionId) {
+  return db.prepare(`
+    SELECT payment_method, SUM(total) as total 
+    FROM sales 
+    WHERE session_id = ? 
+    GROUP BY payment_method
+  `).all(sessionId);
+}
