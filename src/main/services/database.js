@@ -69,30 +69,44 @@ export function initDB() {
     db.prepare("ALTER TABLE products ADD COLUMN image_path TEXT").run();
     db.prepare("ALTER TABLE categories ADD COLUMN image_path TEXT").run();
     db.prepare("ALTER TABLE sales ADD COLUMN session_id INTEGER").run();
-    //db.prepare(`ALTER TABLE sales ADD COLUMN payment_method TEXT DEFAULT 'CASH'`).run();
   } catch (e) { }
 
- try {
-  db.prepare(`ALTER TABLE sales ADD COLUMN payment_method TEXT DEFAULT 'CASH'`).run();
-  console.log("Columna payment_method añadida con éxito.");
-} catch (err) {
-  if (err.message.includes("duplicate column name")) {
-    // La columna ya existía, no hacemos nada
-  } else {
-    console.error("Error al actualizar tabla sales:", err);
+  try {
+    db.prepare(`ALTER TABLE sales ADD COLUMN payment_method TEXT DEFAULT 'CASH'`).run();
+    console.log("Columna payment_method añadida con éxito.");
+  } catch (err) {
+    if (err.message.includes("duplicate column name")) {
+      // La columna ya existía, no hacemos nada
+    } else {
+      console.error("Error al actualizar tabla sales:", err);
+    }
   }
-}
 
-try {
-  db.prepare(`ALTER TABLE sale_items ADD COLUMN name TEXT DEFAULT 'CASH'`).run();
-  console.log("Columna name añadida con éxito.");
-} catch (err) {
-  if (err.message.includes("duplicate column name")) {
-    // La columna ya existía, no hacemos nada
-  } else {
-    console.error("Error al actualizar tabla sale_items:", err);
+
+
+
+  try {
+    db.prepare(`UPDATE sales SET payment_method = 'CASH' WHERE payment_method IS NULL`).run();
+    console.log("Columna payment_method actualizada con éxito.");
+  } catch (err) {
+    if (err.message.includes("duplicate column payment_method")) {
+      // La columna ya existía, no hacemos nada
+    } else {
+      console.error("Error al actualizar tabla sales:", err);
+    }
   }
-}
+
+
+  try {
+    db.prepare(`ALTER TABLE sale_items ADD COLUMN name TEXT DEFAULT 'CASH'`).run();
+    console.log("Columna name añadida con éxito.");
+  } catch (err) {
+    if (err.message.includes("duplicate column name")) {
+      // La columna ya existía, no hacemos nada
+    } else {
+      console.error("Error al actualizar tabla sale_items:", err);
+    }
+  }
 
   // Sembrado de datos (Categorías)
   const countCategories = db.prepare('SELECT COUNT(*) as total FROM categories').get();
@@ -155,66 +169,27 @@ export function deleteCategory(id) {
   return db.prepare("DELETE FROM categories WHERE id = ?").run(id);
 }
 
-// --- VENTAS (CORREGIDO) ---
-// Aquí estaba el error: la función no aceptaba ni guardaba el session_id
-// export function saveSale({ cart, total, session_id }) {
-//   const transaction = db.transaction((cartItems, totalAmount, sessionId) => {
-//     // Insertamos la venta vinculándola a la sesión activa
-//     const stmt = db.prepare('INSERT INTO sales (total, session_id) VALUES (?, ?)').run(totalAmount, sessionId);
-//     const saleId = stmt.lastInsertRowid;
 
-//     const insertItem = db.prepare(`
-//       INSERT INTO sale_items (sale_id, product_id, qty, price) 
-//       VALUES (?, ?, ?, ?)
-//     `);
+export function saveSale({ cart, total, session_id, payment_method }) {
+  const transaction = db.transaction((cartItems, totalAmount, sessionId, method) => {
+    // Insertamos la venta incluyendo el método de pago
+    const stmt = db.prepare('INSERT INTO sales (total, session_id, payment_method) VALUES (?, ?, ?)').run(totalAmount, sessionId, method);
+    const saleId = stmt.lastInsertRowid;
 
-//     for (const item of cartItems) {
-//       insertItem.run(saleId, item.id, item.qty, item.price);
-//     }
-
-//     return saleId;
-//   });
-
-//   // Pasamos los 3 parámetros a la transacción
-//   const id = transaction(cart, total, session_id);
-//   return { id, success: true };
-// }
-
-export function saveSale(saleData) {
-  console.log("Guardando venta con datos:", saleData);
-  const { total, cart, session_id, payment_method, date } = saleData;
-
-  // Creamos una transacción para asegurar que se guarde TODO o NADA
-  const executeSale = db.transaction((saleItems) => {
-    // 1. Insertamos la venta principal
-    const saleInfo = db.prepare(`
-      INSERT INTO sales (total, session_id, payment_method, date)
-      VALUES (?, ?, ?, ?)
-    `).run(total, session_id, payment_method, date || new Date().toISOString());
-
-    const saleId = saleInfo.lastInsertRowid;
-
-    // 2. Insertamos cada producto del carrito en la tabla sale_items
     const insertItem = db.prepare(`
-      INSERT INTO sale_items (sale_id, product_id, name, qty, price)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO sale_items (sale_id, product_id, qty, price) 
+      VALUES (?, ?, ?, ?)
     `);
 
-    for (const item of saleItems) {
-      insertItem.run(saleId, item.id, item.name, item.qty, item.price);
-      
+    for (const item of cartItems) {
+      insertItem.run(saleId, item.id, item.qty, item.price);
     }
 
     return saleId;
   });
 
-  try {
-    const id = executeSale(cart);
-    return { success: true, id };
-  } catch (error) {
-    console.error("Error crítico en la transacción de venta:", error);
-    return { success: false, error: error.message };
-  }
+  const id = transaction(cart, total, session_id, payment_method);
+  return { id, success: true };
 }
 
 // --- PRODUCTOS ---
@@ -283,12 +258,17 @@ export function getTopProducts(limit = 5) {
 }
 
 export function getSalesByHour() {
-  return db.prepare(`
-    SELECT strftime('%H', date) as hour, COUNT(id) as count, SUM(total) as total_amount
-    FROM sales
-    GROUP BY hour
-    ORDER BY total_amount DESC
-  `).all();
+  try {
+    return db.prepare(`
+      SELECT strftime('%H', date) as hour, COUNT(id) as count, SUM(total) as total_amount
+      FROM sales
+      GROUP BY hour
+      ORDER BY hour ASC 
+    `).all(); // Ordenado por hora para el gráfico
+  } catch (error) {
+    console.error("Error en getSalesByHour:", error);
+    return [];
+  }
 }
 
 export function getSalesByRange(startDate, endDate) {
@@ -301,11 +281,20 @@ export function getSalesByRange(startDate, endDate) {
 }
 
 export function getDailySalesChart(startDate, endDate) {
-  const n = 15;
- const ventas = db.prepare("SELECT * FROM sales WHERE total > ?").all(n);
-  const row =  db.prepare(`SELECT date(date) as day, SUM(total) as daily_total FROM sales WHERE date BETWEEN ? AND ? GROUP BY day ORDER BY day ASC`).all(startDate, endDate);
-  console.log("Dato de ventas: " ,ventas);
-  console.log("Dato de chart: " ,row);
+  try {
+    const row = db.prepare(`
+      SELECT date(date) as day, SUM(total) as daily_total 
+      FROM sales 
+      WHERE date >= ? AND date <= ? 
+      GROUP BY day 
+      ORDER BY day ASC
+    `).all(startDate, endDate);
+
+    return row || []; // Siempre retorna un array aunque esté vacío
+  } catch (error) {
+    console.error("Error en getDailySalesChart:", error);
+    return [];
+  }
 }
 
 
@@ -370,12 +359,15 @@ export function getZReportData() {
     FROM sales 
     WHERE session_id IN (${sessionIds})
   `).get();
-
+  const methods = getPaymentMethods(sessionIds);
+  // Convertimos el array de métodos en un objeto fácil de usar: { CASH: 100, CARD: 50 }
+  const totalsByMethod = getTotalsByMethod(methods);
   return {
     sessions,
     total_sales: salesSummary.total_sales || 0,
     sales_count: salesSummary.count || 0,
-    date: new Date().toISOString()
+    date: new Date().toISOString(),
+    totals_by_method: totalsByMethod
   };
 }
 
@@ -393,11 +385,16 @@ export function getXReportData(sessionId) {
     WHERE session_id = ?
   `).get(sessionId);
 
+  const methods = getPaymentMethods(sessionId);
+  // Convertimos el array de métodos en un objeto fácil de usar: { CASH: 100, CARD: 50 }
+  const totalsByMethod = getTotalsByMethod(methods);
+
   return {
     ...session,
     total_sales: sales.total_sales,
     sales_count: sales.count,
-    expected_cash: session.initial_cash + sales.total_sales
+    expected_cash: session.initial_cash + sales.total_sales,
+    totals_by_method: totalsByMethod
   };
 }
 
@@ -439,16 +436,19 @@ export function getArchivedReports() {
 
 // 1. Listado para la tabla
 export function getArchivedHistory() {
-  return db.prepare(`
+  const history = db.prepare(`
         SELECT 
             DATE(end_time) as date,
             COUNT(id) as session_count,
-            SUM(closing_cash) as total_cash
+            -- Restamos el fondo inicial del cierre para obtener solo la venta real
+            SUM(closing_cash - initial_cash) as total_cash 
         FROM cash_sessions
         WHERE status = 'ARCHIVED'
         GROUP BY DATE(end_time)
         ORDER BY date DESC
     `).all();
+    console.log("Historial de cierres archivados:", history);
+  return history;
 }
 
 // 2. Detalle para re-imprimir un reporte Z pasado
@@ -460,17 +460,24 @@ export function getPastZReport(date) {
     `).all(date);
 
   const sessionIds = sessions.map(s => s.id).join(',');
+  // 1. Total general
   const sales = db.prepare(`
         SELECT IFNULL(SUM(total), 0) as total_sales, COUNT(*) as count 
         FROM sales 
         WHERE session_id IN (${sessionIds})
     `).get();
 
+  // 2. DESGLOSE POR MÉTODO (Nuevo)
+  const methods = getPaymentMethods(sessionIds);
+  // Convertimos el array de métodos en un objeto fácil de usar: { CASH: 100, CARD: 50 }
+  const totalsByMethod = getTotalsByMethod(methods);
+
   return {
     date,
     sessions,
     total_sales: sales.total_sales,
-    sales_count: sales.count
+    sales_count: sales.count,
+    totals_by_method: totalsByMethod
   };
 }
 
@@ -500,11 +507,16 @@ export function closeDayAndSession({ session_id, closing_cash }) {
       WHERE session_id IN (${sessionIds})
     `).get();
 
+    const methods = getPaymentMethods(sessionIds);
+    // Convertimos el array de métodos en un objeto fácil de usar: { CASH: 100, CARD: 50 }
+    const totalsByMethod = getTotalsByMethod(methods);
+
     return {
       sessions,
       total_sales: summary.total_sales || 0,
       sales_count: summary.count || 0,
-      date: new Date().toISOString()
+      date: new Date().toISOString(),
+      totals_by_method: totalsByMethod
     };
   });
 
@@ -536,4 +548,24 @@ export function getSalesTotalsByMethod(sessionId) {
     WHERE session_id = ? 
     GROUP BY payment_method
   `).all(sessionId);
+}
+
+//HELPER para obtener el metodo de pago. Esto se puede usar para mostrar el desglose en el Reporte X o Z
+export function getPaymentMethods(sessionIds) {
+  const methods = db.prepare(`
+        SELECT payment_method, IFNULL(SUM(total), 0) as total
+        FROM sales
+        WHERE session_id IN (${sessionIds})
+        GROUP BY payment_method
+    `).all();
+  return methods;
+}
+//obtener el total por método de pago para una sesión específica
+export function getTotalsByMethod(methods) {
+
+  const totalsByMethod = {
+    CASH: methods.find(m => m.payment_method === 'CASH')?.total || 0,
+    CARD: methods.find(m => m.payment_method === 'CARD')?.total || 0
+  };
+  return totalsByMethod;
 }

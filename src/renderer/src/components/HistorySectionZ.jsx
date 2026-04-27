@@ -94,12 +94,40 @@ export default function HistorySectionZ({ settings }) {
                                 <span>TOTAL VENTAS:</span>
                                 <span className="font-black">{selectedReport.total_sales.toFixed(2)}€</span>
                             </div>
-                            {selectedReport.sessions.map(s => (
-                                <div key={s.id} className="text-xs text-slate-500 flex justify-between">
-                                    <span>{s.user_name}</span>
-                                    <span>{s.closing_cash.toFixed(2)}€</span>
+
+                            {/* NUEVO: DESGLOSE POR MÉTODO DE PAGO */}
+                            <div className="bg-slate-50 p-4 rounded-2xl space-y-2 border border-slate-100">
+                                <div className="flex justify-between text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                    <span>Desglose de Pagos</span>
                                 </div>
-                            ))}
+                                <div className="flex justify-between text-slate-600">
+                                    <span>💵 EFECTIVO:</span>
+                                    <span className="font-bold">{selectedReport.totals_by_method?.CASH.toFixed(2)}€</span>
+                                </div>
+                                <div className="flex justify-between text-slate-600">
+                                    <span>💳 TARJETA:</span>
+                                    <span className="font-bold">{selectedReport.totals_by_method?.CARD.toFixed(2)}€</span>
+                                </div>
+                            </div>
+                            {/* LISTADO DE SESIONES (TURNOS) */}
+                            <div className="pt-2 space-y-2">
+                                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                                    Detalle por Turno
+                                </div>
+                                {selectedReport.sessions.map(s => (
+                                    <div key={s.id} className="text-xs border-b border-slate-50 py-2">
+                                        <div className="flex justify-between font-bold text-slate-700">
+                                            <span>👤 {s.user_name}</span>
+                                            {/* Aquí mostramos la venta real de esa sesión */}
+                                            <span>{(s.closing_cash - s.initial_cash).toFixed(2)}€</span>
+                                        </div>
+                                        <div className="flex justify-between text-[9px] text-slate-400">
+                                            <span>Arqueo Físico: {s.closing_cash.toFixed(2)}€</span>
+                                            <span>Fondo: {s.initial_cash.toFixed(2)}€</span>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                         <div className="p-6 bg-slate-50 flex gap-2 rounded-b-[2rem]">
                             <button onClick={() => setSelectedReport(null)} className="flex-1 py-3 font-bold text-slate-400 text-xs uppercase">Cerrar</button>

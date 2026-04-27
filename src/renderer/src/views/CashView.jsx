@@ -93,6 +93,7 @@ export default function CashView({ activeSession, onRefresh }) {
             });
 
             // 2. Obtenemos datos para la vista previa del Reporte X
+            debugger;
             const reportX = await window.electronAPI.getXReport(activeSession.id);
 
             // 3. Mostramos el modal y limpiamos estados
@@ -226,45 +227,56 @@ export default function CashView({ activeSession, onRefresh }) {
                 )}
             </div>
 
-            {/* --- MODAL VISTA PREVIA REPORTE Z (ESTILO TICKET) --- */}
+            {/* --- MODAL VISTA PREVIA REPORTE Z --- */}
             {zReportPreview && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
                     <div className="bg-white w-full max-w-sm rounded-lg shadow-2xl flex flex-col max-h-[90vh] animate-in zoom-in-95">
 
-                        {/* Cabecera del Ticket */}
                         <div className="p-6 border-b border-dashed border-slate-200 text-center">
                             <h3 className="font-black text-xl uppercase tracking-tighter">Vista Previa Reporte Z</h3>
                             <p className="text-[10px] text-slate-400 font-mono mt-1">{new Date().toLocaleString()}</p>
                         </div>
 
-                        {/* Cuerpo del Ticket (Scrollable) */}
                         <div className="flex-1 overflow-y-auto p-6 font-mono text-sm space-y-4">
-                            <div className="border-b border-slate-100 pb-2">
-                                <div className="flex justify-between"><span>TOTAL VENTAS:</span><span className="font-bold">{zReportPreview.total_sales.toFixed(2)}€</span></div>
-                                <div className="flex justify-between"><span>Nº TICKETS:</span><span>{zReportPreview.sales_count}</span></div>
+                            <div className="border-b-2 border-slate-900 pb-2">
+                                <div className="flex justify-between text-lg font-black">
+                                    <span>TOTAL VENTAS:</span>
+                                    <span>{zReportPreview.total_sales.toFixed(2)}€</span>
+                                </div>
+                                <div className="flex justify-between text-[10px] text-slate-500">
+                                    <span>Nº TICKETS:</span>
+                                    <span>{zReportPreview.sales_count}</span>
+                                </div>
+                            </div>
+
+                            {/* NUEVO: DESGLOSE POR MÉTODO (Z) */}
+                            <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-1">
+                                <p className="text-[10px] font-black text-slate-400 uppercase mb-2">Ventas por Método:</p>
+                                <div className="flex justify-between text-xs font-bold text-slate-700">
+                                    <span>💵 EFECTIVO:</span>
+                                    <span>{zReportPreview.totals_by_method?.CASH?.toFixed(2) || "0.00"}€</span>
+                                </div>
+                                <div className="flex justify-between text-xs font-bold text-slate-700">
+                                    <span>💳 TARJETA:</span>
+                                    <span>{zReportPreview.totals_by_method?.CARD?.toFixed(2) || "0.00"}€</span>
+                                </div>
                             </div>
 
                             <div className="space-y-3">
-                                <p className="text-[10px] font-bold text-slate-400 border-b border-slate-50 pb-1 uppercase">Desglose de Turnos:</p>
+                                <p className="text-[10px] font-bold text-slate-400 border-b border-slate-50 pb-1 uppercase">Detalle de Turnos:</p>
                                 {zReportPreview.sessions.map(s => (
                                     <div key={s.id} className="text-xs">
                                         <div className="flex justify-between font-bold">
-                                            <span>{s.user_name} (ID:{s.id})</span>
+                                            <span>{s.user_name}</span>
                                             <span>{s.closing_cash?.toFixed(2)}€</span>
-                                        </div>
-                                        <div className="flex justify-between text-[10px] text-slate-500">
-                                            <span>Fondo: {s.initial_cash.toFixed(2)}€</span>
-                                            <span>Neto: {(s.closing_cash - s.initial_cash).toFixed(2)}€</span>
                                         </div>
                                     </div>
                                 ))}
                             </div>
-
                             <div className="pt-4 border-t-2 border-dashed border-slate-200 text-center italic text-xs">
                                 <p>*** Fin del Reporte ***</p>
                             </div>
                         </div>
-
                         {/* Botones de Acción */}
                         <div className="p-4 bg-slate-50 flex gap-2">
                             <button onClick={() => setZReportPreview(null)} className="flex-1 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-600 text-xs uppercase">Cerrar</button>
@@ -274,7 +286,8 @@ export default function CashView({ activeSession, onRefresh }) {
                 </div>
             )}
 
-            {/* --- MODAL VISTA PREVIA REPORTE X (ARQUEO DE TURNO) --- */}
+
+            {/* --- MODAL VISTA PREVIA REPORTE X --- */}
             {xReportPreview && (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[110] p-4">
                     <div className="bg-white w-full max-w-sm rounded-lg shadow-2xl flex flex-col animate-in zoom-in-95">
@@ -288,16 +301,43 @@ export default function CashView({ activeSession, onRefresh }) {
                                 <span>EMPLEADO:</span>
                                 <span>{xReportPreview.user_name}</span>
                             </div>
-                            <div className="flex justify-between"><span>FONDO INICIAL:</span><span>{xReportPreview.initial_cash.toFixed(2)}€</span></div>
-                            <div className="flex justify-between"><span>VENTAS TURNO:</span><span>{xReportPreview.total_sales.toFixed(2)}€</span></div>
-                            <div className="flex justify-between border-t pt-2 text-slate-500"><span>ESPERADO:</span><span>{xReportPreview.expected_cash.toFixed(2)}€</span></div>
-                            <div className="flex justify-between font-black text-orange-600"><span>CONTADO:</span><span>{xReportPreview.closing_cash.toFixed(2)}€</span></div>
-                            <div className="flex justify-between border-t border-dashed pt-2 font-bold italic">
+
+                            {/* VENTAS GENERALES */}
+                            <div className="space-y-1">
+                                <div className="flex justify-between"><span>FONDO INICIAL:</span><span>{xReportPreview.initial_cash.toFixed(2)}€</span></div>
+                                <div className="flex justify-between font-bold"><span>TOTAL VENTAS:</span><span>{xReportPreview.total_sales.toFixed(2)}€</span></div>
+                            </div>
+
+                            {/* NUEVO: DESGLOSE POR MÉTODO (X) */}
+                            <div className="py-2 px-3 bg-orange-50/50 rounded-xl border border-orange-100 space-y-1 text-xs">
+                                <div className="flex justify-between">
+                                    <span>Efectivo (Ventas):</span>
+                                    <span>{xReportPreview.totals_by_method?.CASH?.toFixed(2) || "0.00"}€</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span>Tarjeta:</span>
+                                    <span>{xReportPreview.totals_by_method?.CARD?.toFixed(2) || "0.00"}€</span>
+                                </div>
+                            </div>
+
+                            {/* ARQUEO FINAL */}
+                            <div className="flex justify-between border-t pt-2 text-slate-500">
+                                <span>ESPERADO CAJA:</span>
+                                <span>{xReportPreview.expected_cash.toFixed(2)}€</span>
+                            </div>
+                            <div className="flex justify-between font-black text-orange-600 text-lg">
+                                <span>CONTADO:</span>
+                                <span>{xReportPreview.closing_cash.toFixed(2)}€</span>
+                            </div>
+
+                            <div className="flex justify-between border-t border-dashed pt-2 font-bold italic text-slate-700">
                                 <span>DIFERENCIA:</span>
-                                <span>{(xReportPreview.closing_cash - xReportPreview.expected_cash).toFixed(2)}€</span>
+                                <span className={(xReportPreview.closing_cash - xReportPreview.expected_cash) < 0 ? "text-red-600" : "text-green-600"}>
+                                    {(xReportPreview.closing_cash - xReportPreview.expected_cash).toFixed(2)}€
+                                </span>
                             </div>
                         </div>
-
+                        {/* ... botones ... */}
                         <div className="p-4 bg-slate-50 flex flex-col gap-2">
                             <button onClick={() => { setXReportPreview(null); onRefresh(); }} className="w-full py-4 bg-slate-900 text-white rounded-xl font-black uppercase text-xs tracking-widest">
                                 🖨️ IMPRIMIR Y FINALIZAR

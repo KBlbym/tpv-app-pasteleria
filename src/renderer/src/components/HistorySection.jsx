@@ -51,8 +51,6 @@ export default function HistorySection() {
     }));
     setSales(data);
     setChartData(formattedChart);
-    console.log("·Data: ", data)
-    console.log("chartdata: ", chartData )
     setSelectedSale(null);
   };
 
