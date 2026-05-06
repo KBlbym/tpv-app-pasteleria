@@ -32,6 +32,8 @@ export function initDB() {
     FOREIGN KEY(category_id) REFERENCES categories(id)
   )`);
 
+
+
   // Tabla de Ventas (CORREGIDA: Ahora incluye session_id desde el inicio)
   db.exec(`CREATE TABLE IF NOT EXISTS sales (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,7 +65,16 @@ export function initDB() {
       status TEXT DEFAULT 'OPEN'
     )
   `);
-
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS cash_expenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER,
+        amount REAL NOT NULL,
+        description TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (session_id) REFERENCES cash_sessions(id)
+    )
+`);
   // Mantenimiento de columnas para DBs ya existentes
   try {
     db.prepare("ALTER TABLE products ADD COLUMN image_path TEXT").run();
@@ -198,8 +209,47 @@ export function getProducts() {
 }
 
 export function getDailySales() {
-  const row = db.prepare(`SELECT SUM(s.total) as dailyTotal FROM sales s JOIN cash_sessions cs ON s.session_id = cs.id  WHERE cs.status != 'ARCHIVED'`).get();
-  return row.dailyTotal || 0;
+  const row = db.prepare(`
+    SELECT 
+      SUM(s.total) as dailyTotal,
+      SUM(CASE WHEN s.payment_method = 'CASH' THEN s.total ELSE 0 END) as totalCash,
+      SUM(CASE WHEN s.payment_method = 'CARD' THEN s.total ELSE 0 END) as totalCard
+    FROM sales s 
+    JOIN cash_sessions cs ON s.session_id = cs.id  
+    WHERE cs.status != 'ARCHIVED'
+  `).get();
+
+  return {
+    dailyTotal: row.dailyTotal || 0,
+    totalCash: row.totalCash || 0,
+    totalCard: row.totalCard || 0
+  };
+}
+
+// Gastos totales de todas las sesiones de la jornada actual (que no han sido enviadas al histórico Z)
+export function getDailyExpenses() {
+  // Sumamos todos los gastos de sesiones que NO están archivadas
+  // Esto nos da el total de "hoy" (el acumulado para el próximo Reporte Z)
+  const row = db.prepare(`
+    SELECT IFNULL(SUM(e.amount), 0) as total 
+    FROM cash_expenses e
+    JOIN cash_sessions s ON e.session_id = s.id
+    WHERE s.status != 'ARCHIVED'
+  `).get();
+
+  return row.total || 0;
+}
+
+// Gastos solo de la sesión que está abierta ahora mismo
+export function getActiveSessionExpenses() {
+  const row = db.prepare(`
+    SELECT IFNULL(SUM(e.amount), 0) as total 
+    FROM cash_expenses e
+    JOIN cash_sessions s ON e.session_id = s.id
+    WHERE s.status = 'OPEN'
+  `).get();
+
+  return row.total || 0;
 }
 
 export function addProduct(p) {
@@ -340,61 +390,102 @@ export function getActiveSessionSales() {
   return row.sessionTotal || 0;
 }
 
+
 export function getZReportData() {
-  // Obtenemos sesiones cerradas
+  // 1. Obtenemos las sesiones cerradas pero calculando el neto desde la tabla 'sales'
   const sessions = db.prepare(`
-    SELECT id, user_name, initial_cash, closing_cash, (closing_cash - initial_cash) as net_cash
-    FROM cash_sessions 
-    WHERE status = 'CLOSED'
+    SELECT 
+      cs.id, 
+      cs.user_name, 
+      cs.initial_cash, 
+      cs.closing_cash,
+      (SELECT COALESCE(SUM(total), 0) FROM sales WHERE session_id = cs.id) as net_cash
+    FROM cash_sessions cs
+    WHERE cs.status = 'CLOSED'
   `).all();
 
   if (sessions.length === 0) {
-    return { sessions: [], total_sales: 0, sales_count: 0, date: new Date().toISOString() };
+    return { sessions: [], expenses: [], total_sales: 0, sales_count: 0, total_expenses: 0, totals_by_method: { CASH: 0, CARD: 0 } };
   }
 
   const sessionIds = sessions.map(s => s.id).join(',');
 
+  // 2. Resumen total de la jornada
   const salesSummary = db.prepare(`
     SELECT SUM(total) as total_sales, COUNT(*) as count 
     FROM sales 
     WHERE session_id IN (${sessionIds})
   `).get();
+
+  // 3. Gastos detallados
+  const expenses = db.prepare(`
+    SELECT amount, description 
+    FROM cash_expenses 
+    WHERE session_id IN (${sessionIds})
+  `).all() || [];
+
+  const totalExpenses = expenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
+
+  // 4. Totales por método
   const methods = getPaymentMethods(sessionIds);
-  // Convertimos el array de métodos en un objeto fácil de usar: { CASH: 100, CARD: 50 }
-  const totalsByMethod = getTotalsByMethod(methods);
+  const totalsByMethod = getTotalsByMethod(methods) || { CASH: 0, CARD: 0 };
+
   return {
     sessions,
+    expenses,
     total_sales: salesSummary.total_sales || 0,
     sales_count: salesSummary.count || 0,
+    total_expenses: totalExpenses,
     date: new Date().toISOString(),
-    totals_by_method: totalsByMethod
+    totals_by_method: {
+        CASH: totalsByMethod.CASH || 0,
+        CARD: totalsByMethod.CARD || 0
+    }
   };
 }
 
-
 export function getXReportData(sessionId) {
+  // 1. Obtenemos los datos básicos de la sesión
   const session = db.prepare(`
     SELECT id, user_name, start_time, end_time, initial_cash, closing_cash 
     FROM cash_sessions 
     WHERE id = ?
   `).get(sessionId);
 
+  // 2. Totales generales de ventas
   const sales = db.prepare(`
     SELECT IFNULL(SUM(total), 0) as total_sales, COUNT(*) as count 
     FROM sales 
     WHERE session_id = ?
   `).get(sessionId);
 
+  // 3. Métodos de pago (para el desglose CARD/CASH)
   const methods = getPaymentMethods(sessionId);
-  // Convertimos el array de métodos en un objeto fácil de usar: { CASH: 100, CARD: 50 }
   const totalsByMethod = getTotalsByMethod(methods);
+
+  // 4. NUEVO: Obtenemos los gastos de esta sesión
+  const expensesList = db.prepare(`
+    SELECT amount, description, created_at 
+    FROM cash_expenses 
+    WHERE session_id = ?
+  `).all(sessionId);
+
+  const totalExpenses = expensesList.reduce((sum, exp) => sum + exp.amount, 0);
+
+  // 5. CÁLCULO DEL ESPERADO:
+  // Solo sumamos las ventas en efectivo (CASH) y restamos los gastos.
+  const cashSales = totalsByMethod['CASH'] || 0;
+  const expected = session.initial_cash + cashSales - totalExpenses;
 
   return {
     ...session,
     total_sales: sales.total_sales,
     sales_count: sales.count,
-    expected_cash: session.initial_cash + sales.total_sales,
-    totals_by_method: totalsByMethod
+    totals_by_method: totalsByMethod,
+    // Nuevos campos para el ticket:
+    expenses: expensesList,
+    total_expenses: totalExpenses,
+    expected_cash: expected
   };
 }
 
@@ -438,16 +529,17 @@ export function getArchivedReports() {
 export function getArchivedHistory() {
   const history = db.prepare(`
         SELECT 
-            DATE(end_time) as date,
-            COUNT(id) as session_count,
-            -- Restamos el fondo inicial del cierre para obtener solo la venta real
-            SUM(closing_cash - initial_cash) as total_cash 
-        FROM cash_sessions
-        WHERE status = 'ARCHIVED'
-        GROUP BY DATE(end_time)
-        ORDER BY date DESC
+            s.date,
+            COUNT(s.id) as session_count,
+            (SUM(s.closing_cash - s.initial_cash) - IFNULL(e.total_expenses, 0)) as total_cash
+        FROM (SELECT id, DATE(end_time) as date, closing_cash, initial_cash FROM cash_sessions WHERE status = 'ARCHIVED') s
+        LEFT JOIN (
+            SELECT session_id, SUM(amount) as total_expenses 
+            FROM cash_expenses GROUP BY session_id
+        ) e ON s.id = e.session_id
+        GROUP BY s.date
+        ORDER BY s.date DESC
     `).all();
-    console.log("Historial de cierres archivados:", history);
   return history;
 }
 
@@ -483,7 +575,8 @@ export function getPastZReport(date) {
 
 export function closeDayAndSession({ session_id, closing_cash }) {
   const transaction = db.transaction(() => {
-    // 1. Primero cerramos la sesión actual del empleado (Cierre X automático)
+    // 1. Cerramos la sesión actual del empleado que solicita el cierre Z
+    // Esto asegura que su turno también cuente en el reporte final
     const stmtClose = db.prepare(`
       UPDATE cash_sessions 
       SET end_time = CURRENT_TIMESTAMP, 
@@ -493,54 +586,95 @@ export function closeDayAndSession({ session_id, closing_cash }) {
     `);
     stmtClose.run(closing_cash, session_id);
 
-    // 2. Obtenemos los datos para el Reporte Z (incluyendo la que acabamos de cerrar)
+    // 2. Obtenemos todas las sesiones cerradas para el Reporte Z
+    // Usamos una subconsulta para calcular 'net_cash' sumando los tickets reales de cada sesión
     const sessions = db.prepare(`
-      SELECT id, user_name, initial_cash, closing_cash 
+      SELECT 
+        id, 
+        user_name, 
+        initial_cash, 
+        closing_cash,
+        (SELECT COALESCE(SUM(total), 0) FROM sales WHERE session_id = cash_sessions.id) as net_cash
       FROM cash_sessions 
       WHERE status = 'CLOSED'
     `).all();
 
+    // Si por alguna razón no hay sesiones (caso borde), devolvemos estructura vacía
+    if (sessions.length === 0) {
+      return { 
+        sessions: [], 
+        expenses: [],
+        total_sales: 0, 
+        sales_count: 0, 
+        total_expenses: 0,
+        date: new Date().toISOString(), 
+        totals_by_method: { CASH: 0, CARD: 0 } 
+      };
+    }
+
+    // Listado de IDs para las consultas de agregación
     const sessionIds = sessions.map(s => s.id).join(',');
+
+    // 3. Resumen global de ventas de toda la jornada
     const summary = db.prepare(`
-      SELECT SUM(total) as total_sales, COUNT(*) as count 
+      SELECT 
+        COALESCE(SUM(total), 0) as total_sales, 
+        COUNT(*) as count 
       FROM sales 
       WHERE session_id IN (${sessionIds})
     `).get();
 
-    const methods = getPaymentMethods(sessionIds);
-    // Convertimos el array de métodos en un objeto fácil de usar: { CASH: 100, CARD: 50 }
-    const totalsByMethod = getTotalsByMethod(methods);
+    // 4. Obtenemos todos los gastos realizados en estas sesiones
+    const expenses = db.prepare(`
+      SELECT amount, description 
+      FROM cash_expenses 
+      WHERE session_id IN (${sessionIds})
+    `).all() || [];
 
+    const totalExpenses = expenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
+
+    // 5. Desglose por métodos de pago (Efectivo/Tarjeta)
+    // Asumiendo que tienes las funciones auxiliares getPaymentMethods y getTotalsByMethod
+    const methods = getPaymentMethods(sessionIds);
+    const totalsByMethod = getTotalsByMethod(methods) || { CASH: 0, CARD: 0 };
+
+    // 6. Retornamos el objeto completo para el frontend
     return {
-      sessions,
-      total_sales: summary.total_sales || 0,
-      sales_count: summary.count || 0,
+      sessions, // Cada sesión ahora tiene su 'net_cash' real
+      expenses,
+      total_sales: summary.total_sales,
+      sales_count: summary.count,
+      total_expenses: totalExpenses,
       date: new Date().toISOString(),
-      totals_by_method: totalsByMethod
+      totals_by_method: {
+        CASH: totalsByMethod.CASH || 0,
+        CARD: totalsByMethod.CARD || 0
+      }
     };
   });
 
+  // Ejecutamos la transacción
   return transaction();
 }
 
-
 export function getExpectedCash(sessionId) {
-  try {
-    // 1. Obtenemos el fondo inicial
-    const session = db.prepare('SELECT initial_cash FROM cash_sessions WHERE id = ?').get(sessionId);
+  const session = db.prepare('SELECT initial_cash FROM cash_sessions WHERE id = ?').get(sessionId);
 
-    // 2. Sumamos las ventas de esa sesión
-    const sales = db.prepare('SELECT SUM(total) as total_sales FROM sales WHERE session_id = ?').get(sessionId);
+  const sales = db.prepare(`
+        SELECT IFNULL(SUM(total), 0) as total 
+        FROM sales 
+        WHERE session_id = ? AND payment_method = 'CASH'
+    `).get(sessionId);
 
-    const initial = session?.initial_cash || 0;
-    const totalSales = sales?.total_sales || 0;
+  const expenses = db.prepare(`
+        SELECT IFNULL(SUM(amount), 0) as total 
+        FROM cash_expenses 
+        WHERE session_id = ?
+    `).get(sessionId);
 
-    return initial + totalSales;
-  } catch (error) {
-    console.error("Error al calcular efectivo esperado:", error);
-    return 0;
-  }
+  return session.initial_cash + sales.total - expenses.total;
 }
+
 export function getSalesTotalsByMethod(sessionId) {
   return db.prepare(`
     SELECT payment_method, SUM(total) as total 
@@ -568,4 +702,18 @@ export function getTotalsByMethod(methods) {
     CARD: methods.find(m => m.payment_method === 'CARD')?.total || 0
   };
   return totalsByMethod;
+}
+
+// Función para registrar un gasto
+export function addExpense(sessionId, amount, description) {
+  // Validamos que la sesión exista y esté abierta
+  const session = db.prepare("SELECT status FROM cash_sessions WHERE id = ?").get(sessionId);
+  if (!session || session.status !== 'OPEN') {
+    throw new Error("No se puede registrar un gasto en una sesión cerrada o inexistente");
+  }
+
+  return db.prepare(`
+        INSERT INTO cash_expenses (session_id, amount, description)
+        VALUES (?, ?, ?)
+    `).run(sessionId, amount, description);
 }

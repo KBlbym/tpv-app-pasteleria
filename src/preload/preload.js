@@ -88,6 +88,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   printSale: (data) => ipcRenderer.invoke('print:sale', data),
   printReportX: (data) => ipcRenderer.invoke('print:reportX', data),
   printReportZ: (data) => ipcRenderer.invoke('print:reportZ', data),
-
+  getDailyExpenses: () => ipcRenderer.invoke('db:get-daily-expenses'),
+  getActiveSessionExpenses: () => ipcRenderer.invoke('db:get-active-session-expenses'),
+  registerExpense: (expenseData) => ipcRenderer.invoke('db:register-expense', expenseData),
 });
 

@@ -19,7 +19,7 @@ import {
   closeDayAndSession,
   getExpectedCash,
   getActiveSessionSales,
-  getArchivedHistory, getPastZReport
+  getArchivedHistory, getPastZReport, addExpense, getActiveSessionExpenses, getDailyExpenses
 
 
 } from './services/database.js';
@@ -346,6 +346,8 @@ ipcMain.handle('db:close-day-session', async (event, data) => {
   return closeDayAndSession(data);
 });
 ipcMain.handle('db:get-expected-cash', async (event, id) => getExpectedCash(id));
+ipcMain.handle('db:get-daily-expenses', async () => getDailyExpenses());
+ipcMain.handle('db:get-active-session-expenses', async () => getActiveSessionExpenses());
 //#endregion
 
 //#region  historial de sesiones y reportes Z pasados
@@ -359,3 +361,11 @@ ipcMain.handle('print:reportX', (event, data) => printReportX(data));
 ipcMain.handle('print:reportZ', (event, data) => printReportZ(data));
 
 //#endregion
+ipcMain.handle('db:register-expense', async (event, expenseData) => {
+    // Aquí llamamos a la función que definiste en el paso anterior de database.js
+    return addExpense(
+        expenseData.session_id, 
+        expenseData.amount, 
+        expenseData.description
+    );
+});

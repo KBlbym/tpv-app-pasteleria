@@ -15,7 +15,11 @@ export default function AdminView() {
   const [categories, setCategories] = useState([]);
   const [settings, setSettings] = useState({});
   const [dailyTotal, setDailyTotal] = useState(0);
+  const [totalCash, setTotalCash] = useState(0);
+  const [totalCard, setTotalCard] = useState(0);
   const [activeSessionTotal, setActiveSessionTotal] = useState(0);
+  const [dailyExpenses, setDailyExpenses] = useState(0);
+  const [activeExpenses, setActiveExpenses] = useState(0);
   const [history, setHistory] = useState([]);
   const [selectedReport, setSelectedReport] = useState(null);
 
@@ -24,16 +28,24 @@ export default function AdminView() {
     const p = await window.electronAPI.getProductsWithCategory();
     const c = await window.electronAPI.getCategories();
     const s = await window.electronAPI.getSettings();
-    const t = await window.electronAPI.getDailySales();
+    //const t = await window.electronAPI.getDailySales();
+    const { dailyTotal, totalCash, totalCard } = await window.electronAPI.getDailySales();
     const ast = await window.electronAPI.getActiveSessionSales();
     const data = await window.electronAPI.getArchivedHistory();
+
+    const de = await window.electronAPI.getDailyExpenses();
+    const ae = await window.electronAPI.getActiveSessionExpenses();
 
     setProducts(p || []);
     setCategories(c || []);
     setSettings(s || {});
-    setDailyTotal(t || 0);
+    setDailyTotal(dailyTotal || 0);
+    setTotalCash(totalCash || 0);
+    setTotalCard(totalCard || 0);
     setActiveSessionTotal(ast || 0);
     setHistory(data);
+    setDailyExpenses(de || 0);
+    setActiveExpenses(ae || 0);
 
   };
 
@@ -45,7 +57,15 @@ export default function AdminView() {
   const renderContent = () => {
     switch (activeTab) {
       case 'resumen':
-        return <DashboardSection dailyTotal={dailyTotal} activeSessionTotal={activeSessionTotal} productCount={products.length} />;
+        return <DashboardSection
+          dailyTotal={dailyTotal}
+          totalCash={totalCash}
+          totalCard={totalCard}
+          activeSessionTotal={activeSessionTotal}
+          productCount={products.length}
+          dailyExpenses={dailyExpenses}
+          activeExpenses={activeExpenses}
+        />;
       case 'inventario':
         return <InventorySection products={products} categories={categories} onRefresh={loadAllData} />;
       case 'empresa':
@@ -54,7 +74,7 @@ export default function AdminView() {
           loadAllData();
         }} />;
       case 'reportes':
-        return  (
+        return (
           <div className="space-y-6">
             {/* Selector de tipo de reporte */}
             <div className="flex bg-white p-1 rounded-2xl w-fit shadow-sm border border-slate-200">
@@ -77,7 +97,7 @@ export default function AdminView() {
           </div>
         );
       default:
-        return <DashboardSection dailyTotal={dailyTotal} activeSessionTotal={activeSessionTotal} productCount={products.length} />;
+        return <DashboardSection dailyTotal={dailyTotal} activeSessionTotal={activeSessionTotal} productCount={products.length} totalCash={totalCash} totalCard={totalCard} />;
     }
   };
 
