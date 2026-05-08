@@ -6,60 +6,77 @@ import { getSettings } from './database.js';
 const executePrint = (printJob) => {
   const settings = getSettings();
   try {
+    // TIP: En el futuro, recupera VID y PID de settings
     const device = new USB();
-    const printer = new escpos.Printer(device);
+
+    // Configuramos el adaptador con encoding para España (CP858 incluye € y ñ)
+    const options = { encoding: "GB18030" }; // O "CP858" dependiendo de la impresora
+
+    const printer = new escpos.Printer(device, options);
 
     device.open((error) => {
       if (error) {
-        console.error("Error de impresora:", error);
+        console.warn("Error de impresora:", error);
         return;
       }
+
+      // Aplicamos el CodeTable para que salgan bien las ñ y €
+      // El comando depende del modelo, pero 19 suele ser PC858 (Euro)
+
+      printer.model('qsprinter').encode('cp858');
+
       // Ejecutamos el diseño específico
       printJob(printer, settings);
 
       printer.feed(3).cut().close();
     });
   } catch (err) {
-    console.error("Impresora no encontrada o desconectada:", err);
+    console.warn("Impresora offline o no conectada.");
   }
 };
 
 // --- DISEÑO: TICKET DE VENTA ---
 export function printSaleTicket(saleData) {
   executePrint((printer, settings) => {
+    const width = 32; // Ancho estándar de 58mm (si es de 80mm usa 42)
+
     printer
       .align('ct').style('b').size(1, 1).text(settings.business_name)
-      .style('normal').size(0, 0)
+      .size(0, 0).style('normal')
       .text(settings.business_address)
       .text(`NIF: ${settings.business_nif}`)
-      .text('--------------------------------')
+      .text('-'.repeat(width))
       .align('lt')
-      .text(`TICKET: ${String(saleData.id || 'N/A').padStart(5, '0')}`)
-      .text(`FECHA: ${new Date().toLocaleString()}`)
-      .text('--------------------------------');
+      .text(`TICKET: ${String(saleData.id).padStart(6, '0')}`)
+      .text(`FECHA:  ${new Date().toLocaleString()}`)
+      .text('-'.repeat(width));
+
+    // Cabecera de tabla
+    printer.text("CANT  DESCRIPCIÓN         TOTAL");
 
     saleData.cart.forEach(item => {
-      const line = `${item.qty} ${item.name.substring(0, 18)}`;
-      const price = `${(item.qty * item.price).toFixed(2)}€`;
-      printer.text(line.padEnd(24) + price.padStart(8));
+      const qty = String(item.qty).padEnd(5);
+      const name = item.name.substring(0, 18).padEnd(19);
+      const price = (item.qty * item.price).toFixed(2).padStart(6) + "€";
+      printer.text(`${qty}${name}${price}`);
     });
 
     printer
-      .text('--------------------------------')
-      .align('rt').style('b').size(1, 1)
+      .text('-'.repeat(width))
+      .align('rt').style('b')
       .text(`TOTAL: ${saleData.total.toFixed(2)}€`)
-      .text(`PAGO:  ${saleData.payment_method === 'CASH' ? 'EFECTIVO' : 'TARJETA'}`)
+      .style('normal')
+      .text(`PAGO: ${saleData.payment_method === 'CASH' ? 'EFECTIVO' : 'TARJETA'}`);
 
-    if (saleData.payment_method === 'CASH') {
-      printer
-        .text(`ENTREGADO: ${saleData.cashReceived.toFixed(2)}€`)
-        .style('b')
-        .text(`CAMBIO:    ${saleData.change.toFixed(2)}€`)
-        .style('normal');
+    if (saleData.payment_method === 'CASH' && saleData.cashReceived) {
+        printer.text(`ENTREGADO: ${saleData.cashReceived.toFixed(2)}€`)
+               .text(`CAMBIO:    ${saleData.change.toFixed(2)}€`);
     }
+
     printer
-      .feed(1).align('ct').style('normal').size(0, 0)
-      .text(settings.ticket_footer || 'Gracias por su visita');
+      .feed(1).align('ct')
+      .text(settings.ticket_footer || 'Gracias por su confianza')
+      .feed(1);
   });
 }
 

@@ -23,7 +23,7 @@ import {
 
 
 } from './services/database.js';
-import { printTicket } from './services/printer.js';
+//import { printTicket } from './services/printer.js';
 import { printSaleTicket, printReportX, printReportZ } from './services/printerService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -156,7 +156,7 @@ ipcMain.handle('db:save-sale', async (event, saleData) => {
 
   // 2. Intento de impresión (Si falla, no pasa nada, seguimos adelante)
   try {
-    await printTicket(saleData);
+    await printSaleTicket(saleData);
   } catch (printError) {
     console.log("Impresora no detectada (Modo simulación)");
   }
@@ -211,7 +211,7 @@ ipcMain.handle('print:test', async () => {
       total: 0,
       cart: [{ qty: 1, name: 'CONCORD CP-450 READY', price: 0 }]
     };
-    printTicket(mockData);
+    await printSaleTicket(mockData);
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
@@ -395,7 +395,27 @@ ipcMain.handle('db:get-past-z-report', async (event, date) => getPastZReport(dat
 //#endregion
 
 //#region  CONFIGURACIÓN DE IMPRESIÓN DESDE EL BACKEND (Fase 4)
-ipcMain.handle('print:sale', (event, data) => printSaleTicket(data));
+ipcMain.handle('print:sale', async (event, saleData) => {
+  const settings = getSettings();
+
+  // Si tienes una impresora térmica configurada en la DB y conectada
+  if (settings.use_thermal_printer) {
+    try {
+      // Intenta usar el driver ESC/POS (printerService.js)
+      printSaleTicket(saleData); 
+      return { success: true };
+    } catch (err) {
+      console.error("Fallo térmica, usando virtual...", err);
+      // Fallback a la impresora normal si la térmica falla
+      await printVirtualTicket(saleData, settings);
+      return { success: true, warning: "Usada impresora normal" };
+    }
+  } else {
+    // Si no hay térmica configurada, usamos siempre la "Impresora Virtual"
+    await printVirtualTicket(saleData, settings);
+    return { success: true };
+  }
+});
 ipcMain.handle('print:reportX', (event, data) => printReportX(data));
 ipcMain.handle('print:reportZ', (event, data) => printReportZ(data));
 
@@ -408,3 +428,105 @@ ipcMain.handle('db:register-expense', async (event, expenseData) => {
         expenseData.description
     );
 });
+
+
+
+//#region (creacion de impresora de prueba para desarrollo sin hardware)
+// main.js
+
+async function printVirtualTicket(saleData, settings) {
+  // Crear una ventana oculta para el renderizado
+  const printWindow = new BrowserWindow({
+    show: false,
+    webPreferences: { nodeIntegration: true }
+  });
+
+  // Diseño CSS para simular papel térmico de 80mm
+  const ticketHTML = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <style>
+          @page { margin: 0; }
+          body {
+            font-family: 'Courier New', Courier, monospace;
+            width: 72mm; /* Ancho estándar imprimible en 80mm */
+            margin: 0 auto;
+            padding: 5mm;
+            background-color: white;
+            color: black;
+          }
+          .header { text-align: center; margin-bottom: 10px; }
+          .business-name { font-weight: bold; font-size: 18px; text-transform: uppercase; }
+          .info { font-size: 12px; margin-bottom: 2px; }
+          .divider { border-top: 1px dashed black; margin: 10px 0; }
+          table { width: 100%; font-size: 12px; border-collapse: collapse; }
+          .qty { width: 10%; }
+          .item { width: 65%; }
+          .price { width: 25%; text-align: right; }
+          .total-section { margin-top: 10px; text-align: right; }
+          .total-row { font-size: 16px; font-weight: bold; }
+          .footer { text-align: center; margin-top: 20px; font-size: 11px; }
+          .emoji { font-family: Arial, sans-serif; } /* Los emojis necesitan fuentes estándar */
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="business-name">${settings.business_name}</div>
+          <div class="info">${settings.business_address}</div>
+          <div class="info">NIF: ${settings.business_nif}</div>
+          <div class="info">Tel: ${settings.business_phone}</div>
+        </div>
+
+        <div class="divider"></div>
+        
+        <div class="info">TICKET: ${String(saleData.id || '0000').padStart(6, '0')}</div>
+        <div class="info">FECHA: ${new Date().toLocaleString()}</div>
+        <div class="info">PAGO: ${saleData.payment_method === 'CASH' ? '💵 EFECTIVO' : '💳 TARJETA'}</div>
+
+        <div class="divider"></div>
+
+        <table>
+          ${saleData.cart.map(item => `
+            <tr>
+              <td class="qty">${item.qty}</td>
+              <td class="item">${item.name}</td>
+              <td class="price">${(item.qty * item.price).toFixed(2)}€</td>
+            </tr>
+          `).join('')}
+        </table>
+
+        <div class="divider"></div>
+
+        <div class="total-section">
+          ${saleData.payment_method === 'CASH' ? `
+            <div class="info">ENTREGADO: ${saleData.cashReceived?.toFixed(2)}€</div>
+            <div class="info">CAMBIO: ${saleData.change?.toFixed(2)}€</div>
+          ` : ''}
+          <div class="total-row">TOTAL: ${saleData.total.toFixed(2)}€</div>
+        </div>
+
+        <div class="footer">
+          <div>${settings.ticket_footer || '¡Gracias por su visita!'}</div>
+          <div style="margin-top: 5px;">*** COPIA DE SEGURIDAD ***</div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  // Cargar el contenido
+  await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(ticketHTML)}`);
+
+  // Enviar a la impresora predeterminada (tu impresora normal)
+  printWindow.webContents.print({
+    silent: false, // Cámbialo a true para que no salga el cuadro de diálogo
+    printBackground: true,
+    deviceName: '' // Vacío usa la predeterminada del sistema
+  }, (success, errorType) => {
+    if (!success) console.log('Error de impresión:', errorType);
+    printWindow.close();
+  });
+}
+
+
+//#endregion
