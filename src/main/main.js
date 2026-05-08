@@ -1,8 +1,7 @@
 import { app, protocol, ipcMain, net, BrowserWindow } from 'electron';
 import path from 'path';
 import fs from 'fs';
-import isDev from 'electron-is-dev';
-import { fileURLToPath } from 'url';
+ import { fileURLToPath } from 'url';
 import {
   initDB, getProducts, saveSale, getDailySales, addProduct, getCategories, getProductsWithCategory,
   getSettings, updateSettings, updateProduct, getActiveProductsWithCategory, toggleProductStatus,
@@ -41,6 +40,10 @@ if (!fs.existsSync(IMAGES_DIR)) {
   fs.mkdirSync(IMAGES_DIR, { recursive: true });
 }
 
+const preloadPath = app.isPackaged
+  ? path.join(__dirname, '../preload/preload.js') // En producción (dentro de app.asar)
+  : path.join(__dirname, '../preload/preload.js'); // Verifica que esta ruta sea correcta en dev
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1200,
@@ -48,7 +51,7 @@ function createWindow() {
     title: "TPV Pastelería - Gestión de Ventas",
     webPreferences: {
       // Importante para la comunicación segura
-      preload: path.join(__dirname, '../preload/preload.js'),
+      preload: preloadPath,
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: true,
@@ -57,9 +60,10 @@ function createWindow() {
 
   // Si estamos en desarrollo, carga el servidor de Vite
   // Si estamos en producción, carga el index.html de la build
-  if (isDev) {
+ // Si NO está empaquetada, es que estamos en desarrollo
+  if (!app.isPackaged) { 
     win.loadURL('http://localhost:5173');
-    win.webContents.openDevTools(); // Abre las herramientas de dev automáticamente
+    win.webContents.openDevTools();
   } else {
     win.loadFile(path.join(__dirname, '../../dist/index.html'));
   }
