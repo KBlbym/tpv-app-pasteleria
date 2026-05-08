@@ -56,7 +56,7 @@ export default function HistorySectionZ({ settings }) {
                                         </span>
                                     </td>
                                     <td className="p-6 text-right font-black text-slate-900 text-lg">
-                                        {row.total_cash.toFixed(2)}€
+                                        {(row.total_cash || 0).toFixed(2)}€
                                     </td>
                                     <td className="p-6 text-right">
                                         <button
@@ -102,11 +102,11 @@ export default function HistorySectionZ({ settings }) {
                                 </div>
                                 <div className="flex justify-between text-slate-600">
                                     <span>💵 EFECTIVO:</span>
-                                    <span className="font-bold">{selectedReport.totals_by_method?.CASH.toFixed(2)}€</span>
+                                    <span className="font-bold">{(selectedReport.totals_by_method?.CASH || 0).toFixed(2)}€</span>
                                 </div>
                                 <div className="flex justify-between text-slate-600">
                                     <span>💳 TARJETA:</span>
-                                    <span className="font-bold">{selectedReport.totals_by_method?.CARD.toFixed(2)}€</span>
+                                    <span className="font-bold">{(selectedReport.totals_by_method?.CARD || 0).toFixed(2)}€</span>
                                 </div>
                             </div>
                             {/* LISTADO DE SESIONES (TURNOS) */}
@@ -119,11 +119,11 @@ export default function HistorySectionZ({ settings }) {
                                         <div className="flex justify-between font-bold text-slate-700">
                                             <span>👤 {s.user_name}</span>
                                             {/* Aquí mostramos la venta real de esa sesión */}
-                                            <span>{(s.closing_cash - s.initial_cash).toFixed(2)}€</span>
+                                            <span>{((s.closing_cash || 0) - (s.initial_cash || 0)).toFixed(2)}€</span>
                                         </div>
                                         <div className="flex justify-between text-[9px] text-slate-400">
-                                            <span>Arqueo Físico: {s.closing_cash.toFixed(2)}€</span>
-                                            <span>Fondo: {s.initial_cash.toFixed(2)}€</span>
+                                            <span>Arqueo Físico: {(s.closing_cash || 0).toFixed(2)}€</span>
+                                            <span>Fondo: {(s.initial_cash || 0).toFixed(2)}€</span>
                                         </div>
                                     </div>
                                 ))}

@@ -151,6 +151,72 @@ export function initDB() {
   }
 }
 
+// Sembrado de datos (Ventas de los últimos 15 días)
+const countSales = db.prepare('SELECT COUNT(*) as total FROM sales').get();
+
+if (countSales.total === 0) {
+  console.log("Sembrando historial de ventas de 15 días...");
+
+  const insertSale = db.prepare(`
+    INSERT INTO sales (total, session_id, payment_method, date) 
+    VALUES (?, ?, ?, ?)
+  `);
+
+  const insertItem = db.prepare(`
+    INSERT INTO sale_items (sale_id, product_id, name, qty, price) 
+    VALUES (?, ?, ?, ?, ?)
+  `);
+
+  // 1. Creamos una sesión de prueba para asociar las ventas
+  const session = db.prepare(`
+    INSERT INTO cash_sessions (user_name, initial_cash, status, start_time) 
+    VALUES (?, ?, ?, ?)
+  `).run('Admin Sistema', 100, 'CLOSED', '2024-01-01 08:00:00');
+
+  const sessionId = session.lastInsertRowid;
+
+  // Productos de referencia para las líneas de venta
+  const mockProducts = [
+    { id: 1, name: 'Barra de Pan', price: 1.10 },
+    { id: 2, name: 'Croissant Classic', price: 1.50 },
+    { id: 3, name: 'Ensaimada', price: 2.20 },
+    { id: 4, name: 'Café Latte', price: 1.80 }
+  ];
+
+  // 2. Bucle para recorrer los últimos 15 días
+  for (let i = 1; i <= 15; i++) {
+    const date = new Date();
+    date.setDate(date.getDate() - i);
+
+    // Generamos entre 5 y 10 ventas aleatorias por cada día
+    const salesPerDay = Math.floor(Math.random() * (10 - 5 + 1)) + 5;
+
+    for (let j = 0; j < salesPerDay; j++) {
+      // Creamos una hora aleatoria para cada venta (entre las 08:00 y las 20:00)
+      const randomHour = Math.floor(Math.random() * (20 - 8 + 1)) + 8;
+      const randomMin = Math.floor(Math.random() * 60);
+      date.setHours(randomHour, randomMin, 0);
+
+      const dateStr = date.toISOString().slice(0, 19).replace('T', ' ');
+
+      // Elegimos productos aleatorios para esta venta
+      const p1 = mockProducts[Math.floor(Math.random() * mockProducts.length)];
+      const p2 = mockProducts[Math.floor(Math.random() * mockProducts.length)];
+      const totalVenta = p1.price + (p2.price * 2);
+      const metodo = Math.random() > 0.5 ? 'CARD' : 'CASH';
+
+      // 3. Insertar Venta
+      const info = insertSale.run(totalVenta, sessionId, metodo, dateStr);
+      const saleId = info.lastInsertRowid;
+
+      // 4. Insertar Líneas de Venta
+      insertItem.run(saleId, p1.id, p1.name, 1, p1.price);
+      insertItem.run(saleId, p2.id, p2.name, 2, p2.price);
+    }
+  }
+  console.log("✔ ¡Éxito! 15 días de historial generados.");
+}
+
 // --- CATEGORÍAS ---
 export function addCategory(cat) {
   const exists = db.prepare("SELECT id FROM categories WHERE LOWER(name) = LOWER(?)").get(cat.name);
@@ -391,6 +457,36 @@ export function getActiveSessionSales() {
 }
 
 
+export function checkSessionSales(sessionId) {
+  try {
+    // Obtenemos el total de ventas y el conteo para esa sesión específica
+    const stats = db.prepare(`
+            SELECT 
+                COUNT(*) as count, 
+                SUM(total) as total 
+            FROM sales 
+            WHERE session_id = ?
+        `).get(sessionId);
+
+    // También podríamos querer saber cuánto fue en CASH y cuánto en CARD
+    const payments = db.prepare(`
+            SELECT payment_method, SUM(total) as total
+            FROM sales
+            WHERE session_id = ?
+            GROUP BY payment_method
+        `).all(sessionId);
+
+    return {
+      count: stats.count || 0,
+      total: stats.total || 0,
+      payments: payments || []
+    };
+  } catch (error) {
+    console.error("Error en checkSessionSales:", error);
+    return { count: 0, total: 0, payments: [] };
+  }
+}
+
 export function getZReportData() {
   // 1. Obtenemos las sesiones cerradas pero calculando el neto desde la tabla 'sales'
   const sessions = db.prepare(`
@@ -438,8 +534,8 @@ export function getZReportData() {
     total_expenses: totalExpenses,
     date: new Date().toISOString(),
     totals_by_method: {
-        CASH: totalsByMethod.CASH || 0,
-        CARD: totalsByMethod.CARD || 0
+      CASH: totalsByMethod.CASH || 0,
+      CARD: totalsByMethod.CARD || 0
     }
   };
 }
@@ -601,14 +697,14 @@ export function closeDayAndSession({ session_id, closing_cash }) {
 
     // Si por alguna razón no hay sesiones (caso borde), devolvemos estructura vacía
     if (sessions.length === 0) {
-      return { 
-        sessions: [], 
+      return {
+        sessions: [],
         expenses: [],
-        total_sales: 0, 
-        sales_count: 0, 
+        total_sales: 0,
+        sales_count: 0,
         total_expenses: 0,
-        date: new Date().toISOString(), 
-        totals_by_method: { CASH: 0, CARD: 0 } 
+        date: new Date().toISOString(),
+        totals_by_method: { CASH: 0, CARD: 0 }
       };
     }
 
@@ -716,4 +812,108 @@ export function addExpense(sessionId, amount, description) {
         INSERT INTO cash_expenses (session_id, amount, description)
         VALUES (?, ?, ?)
     `).run(sessionId, amount, description);
+}
+
+
+export function getBusinessSummary() {
+  const now = new Date();
+  const today = now.toISOString().split('T')[0];
+  const startOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+  const weekAgo = new Date();
+  weekAgo.setDate(now.getDate() - 7);
+  const weekAgoStr = weekAgo.toISOString().split('T')[0];
+
+  // Función interna para no repetir código de desglose
+  const getPeriodDetails = (startDate, endDate = 'now') => {
+    // Totales por pago
+    const payments = db.prepare(`
+      SELECT payment_method, SUM(total) as total 
+      FROM sales 
+      WHERE date(date) BETWEEN date(?) AND date(?)
+      GROUP BY payment_method
+    `).all(startDate, endDate);
+
+    // Gastos
+    const expenses = db.prepare(`
+  SELECT COALESCE(SUM(amount), 0) as total 
+  FROM cash_expenses 
+  WHERE date(created_at) BETWEEN date(?) AND date(?)
+`).get(startDate, endDate).total;
+
+    // Empleados
+    const employees = db.prepare(`
+    SELECT 
+    cs.user_name, 
+    SUM(s.total) as total,
+    SUM(CASE WHEN s.payment_method = 'CASH' THEN s.total ELSE 0 END) as cash,
+    SUM(CASE WHEN s.payment_method = 'CARD' THEN s.total ELSE 0 END) as card
+  FROM sales s
+  JOIN cash_sessions cs ON s.session_id = cs.id
+  WHERE date(s.date) BETWEEN date(?) AND date(?)
+  GROUP BY cs.user_name
+`).all(startDate, endDate);
+
+    return { payments, expenses, employees };
+  };
+
+  return {
+    // Resumen de HOY con detalles
+    today: {
+      total: db.prepare(`SELECT SUM(total) as total FROM sales WHERE date(date) = ?`).get(today).total || 0,
+      details: getPeriodDetails(today, today)
+    },
+
+    // Resumen SEMANAL con detalles
+    weekly: {
+      total: db.prepare(`SELECT SUM(total) as total FROM sales WHERE date(date) >= ?`).get(weekAgoStr).total || 0,
+      details: getPeriodDetails(weekAgoStr)
+    },
+
+    // Resumen MENSUAL con detalles
+    monthly: {
+      total: db.prepare(`SELECT SUM(total) as total FROM sales WHERE date(date) >= ?`).get(startOfMonth).total || 0,
+      details: getPeriodDetails(startOfMonth)
+    },
+
+    avgTicket: db.prepare(`SELECT AVG(total) as avg FROM sales`).get().avg || 0
+  };
+}
+
+// Método que faltaba: Rango de ventas
+export function getSalesRange(start, end) {
+  return db.prepare(`
+    SELECT s.*, cs.user_name 
+    FROM sales s
+    JOIN cash_sessions cs ON s.session_id = cs.id
+    WHERE s.date >= ? AND s.date <= ? 
+    ORDER BY s.date DESC
+  `).all(start, end);
+}
+
+// Método que faltaba: Estadísticas generales
+export function getStats(limit) {
+  const topProducts = db.prepare(`
+    SELECT p.name, SUM(si.qty) as total_qty
+    FROM sale_items si
+    JOIN products p ON si.product_id = p.id
+    GROUP BY p.id
+    ORDER BY total_qty DESC
+    LIMIT ?
+  `).all(limit);
+
+  const busyHour = db.prepare(`
+    SELECT strftime('%H', date) as hour, COUNT(*) as count
+    FROM sales
+    GROUP BY hour
+    ORDER BY count DESC
+    LIMIT 1
+  `).get();
+
+  const hourlyData = db.prepare(`
+    SELECT strftime('%H', date) as hour, COUNT(*) as count, SUM(total) as total_amount
+    FROM sales
+    GROUP BY hour
+  `).all();
+
+  return { topProducts, busyHour, hourlyData };
 }

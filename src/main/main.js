@@ -18,8 +18,8 @@ import {
   archiveSessions,
   closeDayAndSession,
   getExpectedCash,
-  getActiveSessionSales,
-  getArchivedHistory, getPastZReport, addExpense, getActiveSessionExpenses, getDailyExpenses
+  getActiveSessionSales, checkSessionSales,
+  getArchivedHistory, getPastZReport, addExpense, getActiveSessionExpenses, getDailyExpenses,getBusinessSummary
 
 
 } from './services/database.js';
@@ -218,7 +218,42 @@ ipcMain.handle('print:test', async () => {
   }
 });
 
+// main.js (Dentro de tu handler de impresión)
+ipcMain.handle('print:ticket', async (event, data) => {
+  if (data.type === 'REPORT') {
+    let ticketContent = `
+      ${data.title}
+      Fecha: ${data.date}
+      --------------------------------
+      TOTAL VENTAS:    ${data.total.toFixed(2)}€
+      --------------------------------
+      METODOS DE PAGO:
+      Efectivo:        ${data.cash.toFixed(2)}€
+      Tarjeta:         ${data.card.toFixed(2)}€
+      Gastos:         -${data.expenses.toFixed(2)}€
+      
+      VENTAS POR EMPLEADO:
+    `;
 
+    // Iteramos por cada empleado para el ticket físico
+    data.employees.forEach(emp => {
+      ticketContent += `
+      👤 ${emp.name.toUpperCase()}
+      - Efectivo:      ${emp.cash.toFixed(2)}€
+      - Tarjeta:       ${emp.card.toFixed(2)}€
+      - Total:         ${emp.total.toFixed(2)}€
+      `;
+    });
+
+    ticketContent += `
+      --------------------------------
+      *** FIN DEL REPORTE ***
+    `;
+
+    // Aquí llamas a tu librería de impresión (pos-printer o similar)
+    // enviando 'ticketContent'
+  }
+});
 
 // 6. Manejador para obtener categorías (para el selector del formulario)
 ipcMain.handle('db:get-categories', async () => {
@@ -348,10 +383,14 @@ ipcMain.handle('db:close-day-session', async (event, data) => {
 ipcMain.handle('db:get-expected-cash', async (event, id) => getExpectedCash(id));
 ipcMain.handle('db:get-daily-expenses', async () => getDailyExpenses());
 ipcMain.handle('db:get-active-session-expenses', async () => getActiveSessionExpenses());
+ipcMain.handle('db:check-session-sales', async (event, sessionId) => {
+    return checkSessionSales(sessionId);
+});
 //#endregion
 
 //#region  historial de sesiones y reportes Z pasados
 ipcMain.handle('db:get-archived-history', async () => getArchivedHistory());
+ipcMain.handle('db:get-business-summary', async () => getBusinessSummary());
 ipcMain.handle('db:get-past-z-report', async (event, date) => getPastZReport(date));
 //#endregion
 

@@ -18,6 +18,17 @@ export default function HistorySection() {
   const [topLimit, setTopLimit] = useState(5);
   const today = new Date().toISOString().split('T')[0];
   const [dateRange, setDateRange] = useState({ start: today, end: today });
+  const [businessSummary, setBusinessSummary] = useState({ today: 0, weekly: 0, monthly: 0, avgTicket: 0 });
+  const [selectedReport, setSelectedReport] = useState(null);
+
+  useEffect(() => {
+    const loadSummary = async () => {
+      const summary = await window.electronAPI.getBusinessSummary(); // Añade este canal al preload
+      setBusinessSummary(summary);
+      console.log("summary:", businessSummary); // Log para verificar la estructura de los datos
+    };
+    loadSummary();
+  }, [sales]); // Se actualiza cuando cambian las ventas
 
   // 1.  useEffect para que sea más específico
   useEffect(() => {
@@ -29,6 +40,33 @@ export default function HistorySection() {
     handleFilter();
   }, []);
 
+  const openPreview = (title, data) => {
+    if (!data || !data.details) return;
+
+    console.log("Datos recibidos para el reporte:", data); // Log para verificar la estructura de los datos
+
+    const { details } = data;
+
+    // Mapeamos directamente lo que viene del backend
+    const employeeMetrics = details.employees.map(emp => ({
+      name: emp.user_name,
+      total: emp.total || 0,
+      cash: emp.cash || 0,   // Ya viene calculado del SQL
+      card: emp.card || 0    // Ya viene calculado del SQL
+    }));
+
+    setSelectedReport({
+      title: title,
+      date: new Date().toLocaleString(),
+      total_sales: data.total || 0,
+      totals_by_method: {
+        CASH: details.payments?.find(p => p.payment_method === 'CASH')?.total || 0,
+        CARD: details.payments?.find(p => p.payment_method === 'CARD')?.total || 0
+      },
+      expenses: details.expenses || 0,
+      employees: employeeMetrics
+    });
+  };
   // 3. función dedicada solo a las estadísticas
   const loadStats = async (limit) => {
     const s = await window.electronAPI.getStats(limit);
@@ -42,7 +80,7 @@ export default function HistorySection() {
     };
     const data = await window.electronAPI.getSalesRange(range);
     const chart = await window.electronAPI.getDailySalesChart(range);
-    
+
 
     // Formateamos la fecha para que el gráfico se vea limpio (DD/MM)
     const formattedChart = chart.map(d => ({
@@ -51,7 +89,10 @@ export default function HistorySection() {
     }));
     setSales(data);
     setChartData(formattedChart);
-    setSelectedSale(null);
+
+    // FORZAR RECARGA DEL RESUMEN
+    const summary = await window.electronAPI.getBusinessSummary();
+    setBusinessSummary(summary);
   };
 
   const viewDetail = async (sale) => {
@@ -73,10 +114,94 @@ export default function HistorySection() {
     await window.electronAPI.printTicket(printData);
     alert("Re-impresión enviada a la impresora.");
   };
+
+  const handlePrintReport = async () => {
+    if (!selectedReport) return;
+
+    // Enviamos todos los datos del modal a la impresora
+    await window.electronAPI.printTicket({
+      type: 'REPORT',
+      title: selectedReport.title,
+      date: selectedReport.date,
+      total: selectedReport.total_sales,
+      cash: selectedReport.totals_by_method.CASH,
+      card: selectedReport.totals_by_method.CARD,
+      expenses: selectedReport.expenses,
+      employees: selectedReport.employees // Aquí va el array con cash/card por persona
+    });
+
+    alert("Reporte enviado a la impresora.");
+  };
   const totalSales = sales.reduce((acc, sale) => acc + sale.total, 0);
+  const sections = [
+    { title: "Jornada Actual", data: businessSummary.today, color: "bg-orange-500" },
+    { title: "Resumen Semanal", data: businessSummary.weekly, color: "bg-blue-600" },
+    { title: "Resumen Mensual", data: businessSummary.monthly, color: "bg-slate-800" }
+  ];
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-20">
+      <div className="p-6 space-y-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {sections.map((section) => (
+            <div key={section.title} className="bg-white rounded-[2.5rem] p-6 shadow-xl border border-slate-100 relative overflow-hidden">
+              <div className={`absolute top-0 right-0 w-24 h-24 ${section.color} opacity-5 rounded-bl-full`}></div>
+
+              <h3 className="text-slate-400 font-black uppercase text-xs tracking-widest mb-2">{section.title}</h3>
+              <p className="text-4xl font-black text-slate-900 mb-6">{(section.data?.total || 0).toFixed(2)}€</p>
+
+              <div className="space-y-3 mb-6">
+                {/* Desglose de Pagos */}
+                {section.data?.details?.payments?.map(p => (
+                  <div key={p.payment_method} className="flex justify-between items-center text-sm">
+                    <span className="flex items-center gap-2 text-slate-500">
+                      {p.payment_method === 'CASH' ? '💵' : '💳'}
+                      {p.payment_method === 'CASH' ? 'EFECTIVO' : 'TARJETA'}:
+                    </span>
+                    <span className="font-bold text-slate-700">{(p.total || 0).toFixed(2)}€</span>
+                  </div>
+                ))}
+
+                {/* Gastos */}
+                <div className="flex justify-between items-center text-sm text-red-500 pt-2 border-t border-dashed">
+                  <span className="flex items-center gap-2 font-medium">
+                    <span>📉 Gastos</span>
+                  </span>
+                  <span className="font-bold">-{(section.data?.details?.expenses || 0).toFixed(2)}€</span>
+                </div>
+
+
+              </div>
+
+              <button
+                onClick={() => openPreview(section.title, section.data)} // <--- Cambiado de handlePrint a openPreview
+                className="w-full py-3 bg-slate-900 text-white rounded-2xl flex items-center justify-center gap-2 hover:bg-orange-500 transition-colors font-bold text-xs"
+              >
+                📊 VER REPORTE
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* --- RESUMEN DE RENDIMIENTO EMPRESARIAL --- */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+        {[
+          { label: 'Ventas Hoy', value: businessSummary.today, color: 'text-orange-600', icon: '☀️' },
+          { label: 'Últimos 7 Días', value: businessSummary.weekly, color: 'text-blue-600', icon: '📅' },
+          { label: 'Mes Actual', value: businessSummary.monthly, color: 'text-emerald-600', icon: '📊' },
+          { label: 'Ticket Promedio', value: businessSummary.avgTicket, color: 'text-purple-600', icon: '🎫' },
+        ].map((box, i) => (
+          <div key={i} className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+            <div className="flex justify-between items-start">
+              <span className="text-xl">{box.icon}</span>
+              <span className={`text-lg font-black ${box.color}`}>
+                {Number(box.value).toFixed(2)}€
+              </span>
+            </div>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">{box.label}</p>
+          </div>
+        ))}
+      </div>
       {/* --- SECCIÓN 1: INSIGHTS DE NEGOCIO --- */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <div className="bg-gradient-to-br from-orange-500 to-orange-600 p-8 rounded-[2.5rem] text-white shadow-xl shadow-orange-100">
@@ -138,13 +263,16 @@ export default function HistorySection() {
           </button>
         </div>
       </div>
-      {/* 2. GRÁFICO PROFESIONAL CON RECHARTS */}
+      {/* 3. GRÁFICO DE TENDENCIA */}
       <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
         <div className="flex justify-between items-center mb-8">
-          <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Evolución de Ingresos</h4>
+          <div>
+            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Evolución de Ingresos</h4>
+            <p className="text-2xl font-black text-slate-800">Tendencia de Ventas</p>
+          </div>
           <div className="flex items-center gap-2">
             <span className="w-3 h-3 bg-orange-500 rounded-full"></span>
-            <span className="text-xs font-bold text-slate-600">Ventas Diarias (€)</span>
+            <span className="text-xs font-bold text-slate-600">Ventas (€)</span>
           </div>
         </div>
 
@@ -158,36 +286,15 @@ export default function HistorySection() {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis
-                dataKey="displayDate"
-                axisLine={false}
-                tickLine={false}
-                tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 'bold' }}
-                dy={10}
-              />
-              <YAxis
-                axisLine={false}
-                tickLine={false}
-                tick={{ fill: '#94a3b8', fontSize: 10 }}
-                tickFormatter={(value) => `${value}€`}
-              />
-              <Tooltip
-                contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '12px', fontWeight: 'bold' }}
-                cursor={{ stroke: '#f97316', strokeWidth: 2 }}
-              />
-              <Area
-                type="monotone"
-                dataKey="daily_total"
-                stroke="#f97316"
-                strokeWidth={4}
-                fillOpacity={1}
-                fill="url(#colorTotal)"
-                animationDuration={1500}
-              />
+              <XAxis dataKey="displayDate" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 'bold' }} dy={10} />
+              <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 10 }} tickFormatter={(val) => `${val}€`} />
+              <Tooltip contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+              <Area type="monotone" dataKey="daily_total" stroke="#f97316" strokeWidth={4} fill="url(#colorTotal)" animationDuration={1500} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
       </div>
+
       {/* --- SECCIÓN 2: LISTADO Y DETALLE --- */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
 
@@ -245,81 +352,81 @@ export default function HistorySection() {
             </table>
 
 
-            
+
 
 
           </div>
         </div>
 
         {/* PANEL DE DETALLE (TICKET) */}
-        
-{/* PANEL DE DETALLE (TICKET) */}
-<div className="lg:col-span-2">
-  {selectedSale ? (
-    <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-2xl overflow-hidden animate-in slide-in-from-right-4 duration-300">
-      <div className="bg-slate-900 p-8 text-white">
-        <div className="flex justify-between items-start">
-          <div>
-            <h4 className="text-[10px] font-black text-orange-400 uppercase tracking-[0.2em] mb-1">Resumen de Venta</h4>
-            <p className="text-3xl font-black">{selectedSale.total.toFixed(2)}€</p>
-          </div>
-          <button
-            onClick={handleReprint}
-            className="p-4 bg-white/10 rounded-2xl hover:bg-orange-500 transition-all active:scale-90"
-            title="Imprimir Copia"
-          >
-            🖨️
-          </button>
-        </div>
-      </div>
 
-      <div className="p-8">
-        <div className="space-y-4">
-          <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b pb-2">Artículos</h5>
-          {items.map((item, idx) => (
-            <div key={idx} className="flex justify-between items-center">
-              <div className="flex flex-col">
-                <span className="text-sm font-bold text-slate-700">{item.name}</span>
-                <span className="text-[10px] text-slate-400">{item.qty} x {item.price.toFixed(2)}€</span>
+        {/* PANEL DE DETALLE (TICKET) */}
+        <div className="lg:col-span-2">
+          {selectedSale ? (
+            <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-2xl overflow-hidden animate-in slide-in-from-right-4 duration-300">
+              <div className="bg-slate-900 p-8 text-white">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h4 className="text-[10px] font-black text-orange-400 uppercase tracking-[0.2em] mb-1">Resumen de Venta</h4>
+                    <p className="text-3xl font-black">{selectedSale.total.toFixed(2)}€</p>
+                  </div>
+                  <button
+                    onClick={handleReprint}
+                    className="p-4 bg-white/10 rounded-2xl hover:bg-orange-500 transition-all active:scale-90"
+                    title="Imprimir Copia"
+                  >
+                    🖨️
+                  </button>
+                </div>
               </div>
-              <span className="font-mono font-bold text-slate-600">
-                {(item.qty * item.price).toFixed(2)}€
-              </span>
+
+              <div className="p-8">
+                <div className="space-y-4">
+                  <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b pb-2">Artículos</h5>
+                  {items.map((item, idx) => (
+                    <div key={idx} className="flex justify-between items-center">
+                      <div className="flex flex-col">
+                        <span className="text-sm font-bold text-slate-700">{item.name}</span>
+                        <span className="text-[10px] text-slate-400">{item.qty} x {item.price.toFixed(2)}€</span>
+                      </div>
+                      <span className="font-mono font-bold text-slate-600">
+                        {(item.qty * item.price).toFixed(2)}€
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* --- ESTE ES EL FRAGMENTO INTEGRADO --- */}
+                <div className="mt-10 pt-6 border-t border-dashed border-slate-200">
+                  <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase mb-2">
+                    <span>Método de Pago:</span>
+                    <span className="text-slate-900">
+                      {selectedSale.payment_method === 'CASH' ? '💵 EFECTIVO' : '💳 TARJETA'}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase">
+                    <span>ID Transacción:</span>
+                    <span className="text-slate-600">#{selectedSale.id.toString().padStart(5, '0')}</span>
+                  </div>
+
+                  <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase mt-2">
+                    <span>Fecha y Hora:</span>
+                    <span className="text-slate-600">{new Date(selectedSale.date).toLocaleString()}</span>
+                  </div>
+                </div>
+                {/* --- FIN DEL FRAGMENTO --- */}
+              </div>
             </div>
-          ))}
+          ) : (
+            <div className="h-full min-h-[400px] border-2 border-dashed border-slate-200 rounded-[2.5rem] flex flex-col items-center justify-center p-10 text-center text-slate-300">
+              <div className="text-6xl mb-4 opacity-20">🧾</div>
+              <p className="font-bold text-sm uppercase tracking-widest opacity-40">
+                Selecciona una venta<br />para ver el ticket
+              </p>
+            </div>
+          )}
         </div>
-
-        {/* --- ESTE ES EL FRAGMENTO INTEGRADO --- */}
-        <div className="mt-10 pt-6 border-t border-dashed border-slate-200">
-          <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase mb-2">
-            <span>Método de Pago:</span>
-            <span className="text-slate-900">
-              {selectedSale.payment_method === 'CASH' ? '💵 EFECTIVO' : '💳 TARJETA'}
-            </span>
-          </div>
-          
-          <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase">
-            <span>ID Transacción:</span>
-            <span className="text-slate-600">#{selectedSale.id.toString().padStart(5, '0')}</span>
-          </div>
-
-          <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase mt-2">
-            <span>Fecha y Hora:</span>
-            <span className="text-slate-600">{new Date(selectedSale.date).toLocaleString()}</span>
-          </div>
-        </div>
-        {/* --- FIN DEL FRAGMENTO --- */}
-      </div>
-    </div>
-  ) : (
-    <div className="h-full min-h-[400px] border-2 border-dashed border-slate-200 rounded-[2.5rem] flex flex-col items-center justify-center p-10 text-center text-slate-300">
-      <div className="text-6xl mb-4 opacity-20">🧾</div>
-      <p className="font-bold text-sm uppercase tracking-widest opacity-40">
-        Selecciona una venta<br />para ver el ticket
-      </p>
-    </div>
-  )}
-</div>
       </div>
       {/* --- MODAL DE DETALLES DEL PRODUCTO (Renderizar al final del return) --- */}
       {showProductModal && (
@@ -497,6 +604,97 @@ export default function HistorySection() {
                   <span className="text-sm font-normal opacity-70"> ({stats.hourlyData?.reduce((prev, curr) => prev.total_amount > curr.total_amount ? prev : curr).total_amount?.toFixed(2)}€)</span>
                 </p>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {selectedReport && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+          <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl flex flex-col max-h-[90vh] animate-in zoom-in-95">
+
+            {/* Cabecera */}
+            <div className="p-8 border-b border-dashed border-slate-200 text-center">
+              <h3 className="font-black text-xl uppercase tracking-tighter">Vista Previa Reporte</h3>
+              <div className="mt-4 space-y-1">
+                <h2 className="font-black text-lg uppercase tracking-tight text-orange-500">
+                  {selectedReport.title}
+                </h2>
+                <p className="text-[10px] text-slate-400 font-mono italic">
+                  Generado: {selectedReport.date}
+                </p>
+              </div>
+            </div>
+
+            {/* Cuerpo del Ticket */}
+            <div className="flex-1 overflow-y-auto p-8 font-mono text-sm space-y-6">
+
+              {/* Total Principal */}
+              <div className="flex justify-between border-b-2 border-slate-900 pb-2">
+                <span className="font-bold">TOTAL VENTAS:</span>
+                <span className="font-black text-lg">{(selectedReport.total_sales || 0).toFixed(2)}€</span>
+              </div>
+
+              {/* Desglose de Pagos */}
+              <div className="bg-slate-50 p-4 rounded-2xl space-y-2 border border-slate-100">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Metodos de Pago</p>
+                <div className="flex justify-between text-slate-600">
+                  <span>💵 EFECTIVO:</span>
+                  <span className="font-bold">{(selectedReport.totals_by_method?.CASH || 0).toFixed(2)}€</span>
+                </div>
+                <div className="flex justify-between text-slate-600">
+                  <span>💳 TARJETA:</span>
+                  <span className="font-bold">{(selectedReport.totals_by_method?.CARD || 0).toFixed(2)}€</span>
+                </div>
+                {selectedReport.expenses > 0 && (
+                  <div className="flex justify-between text-red-500 pt-2 border-t border-slate-200 border-dashed">
+                    <span>📉 GASTOS:</span>
+                    <span className="font-bold">-{(selectedReport.expenses || 0).toFixed(2)}€</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Sección de Ventas por Empleado */}
+              {/* Empleados */}
+              {/* Ventas por Empleado */}
+              <div className="mt-4 border-t pt-2">
+                <p className="text-[10px] font-black text-slate-400 uppercase mb-2">Detalle por Empleado</p>
+
+                {selectedReport?.employees?.map((emp, idx) => (
+                  <div key={idx} className="bg-slate-50/50 p-3 rounded-xl border border-slate-100 mb-2">
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="font-black text-slate-800 uppercase text-[11px]">👤 {emp.name}</span>
+                      <span className="font-black text-slate-900">{emp.total.toFixed(2)}€</span>
+                    </div>
+                    <div className="flex gap-4 text-[10px] text-slate-500 font-bold">
+                      <span className="flex items-center gap-1">💵 EFECTIVO: {emp.cash.toFixed(2)}€</span>
+                      <span className="flex items-center gap-1">💳 TARJETA: {emp.card.toFixed(2)}€</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="text-center text-[9px] text-slate-300 pt-4 uppercase">
+                *** Fin del Reporte ***
+              </div>
+            </div>
+
+            {/* Botones de Acción */}
+            <div className="p-6 bg-slate-50 flex gap-3 rounded-b-[2rem]">
+              <button
+                onClick={() => setSelectedReport(null)}
+                className="flex-1 py-3 font-bold text-slate-500 text-xs uppercase hover:bg-slate-200 rounded-xl transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  handlePrintReport(selectedReport.title, selectedReport);
+                  setSelectedReport(null);
+                }}
+                className="flex-2 px-8 py-3 bg-slate-900 text-white rounded-xl font-black text-xs uppercase hover:bg-orange-600 transition-colors flex items-center justify-center gap-2"
+              >
+                <span>🖨️ Imprimir</span>
+              </button>
             </div>
           </div>
         </div>

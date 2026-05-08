@@ -108,7 +108,6 @@ export default function CashView({ activeSession, onRefresh }) {
             });
 
             // 2. Obtenemos datos para la vista previa del Reporte X
-            debugger;
             const reportX = await window.electronAPI.getXReport(activeSession.id);
 
             // 3. Mostramos el modal y limpiamos estados
