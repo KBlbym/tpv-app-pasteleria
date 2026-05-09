@@ -72,6 +72,7 @@ export default function SalesView({ activeSession }) { // <-- Recibimos la sesi√
     setCashReceived(total); // Por defecto, entrega exacta
     setShowPaymentModal(true);
   };
+  
 
   // Al confirmar el pago dentro del modal:
   const confirmSale = async (method) => {
@@ -80,10 +81,13 @@ export default function SalesView({ activeSession }) { // <-- Recibimos la sesi√
       total,
       session_id: activeSession.id,
       payment_method: method, // 'CASH' o 'CARD'
-      date: new Date().toISOString()
+      date: new Date().toISOString(),
+      cashReceived: method === 'CASH' ? cashReceived : total,
+      change: method === 'CASH' ? (cashReceived - total) : 0
     };
 
     try {
+      console.log("Datos de la venta a guardar e imprimir:", saleData);
       const res = await window.electronAPI.saveSale(saleData);
       if (res?.success) {
         setLastSale({
@@ -99,11 +103,18 @@ export default function SalesView({ activeSession }) { // <-- Recibimos la sesi√
       }
     } catch (err) { console.error(err); }
   };
+const handlePrintSaleTicket = async (sale) => {
+  try {
+    await window.electronAPI.printSale(sale);
+  } catch (error) {
+    console.error("Error al imprimir ticket de venta:", error);
+  }
+};
 
-  // Filtrado de productos
-  const filteredProducts = activeCategory
-    ? products.filter(p => p.category_id === activeCategory)
-    : products;
+// Filtrado de productos
+const filteredProducts = activeCategory
+  ? products.filter(p => p.category_id === activeCategory)
+  : products;
 
   return (
     <div className="flex h-full bg-slate-100 relative">
@@ -247,6 +258,7 @@ export default function SalesView({ activeSession }) { // <-- Recibimos la sesi√
 
 
       {/* MODAL DE VISTA PREVIA DEL TICKET */}
+      {/*El modal de vista previa del ticket ya no es necesario comentalo para omitirlo */}
       {showPreview && lastSale && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white w-[380px] shadow-2xl rounded-sm overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200">
@@ -324,10 +336,7 @@ export default function SalesView({ activeSession }) { // <-- Recibimos la sesi√
                 CERRAR (ESC)
               </button>
               <button
-                onClick={async () => {
-                  // Usamos nuestra nueva funci√≥n de impresi√≥n profesional
-                  await window.electronAPI.printSale(lastSale);
-                }}
+                onClick={() => handlePrintSaleTicket(lastSale)}
                 className="bg-orange-500 text-white px-8 rounded-xl font-black hover:bg-orange-600 transition-colors flex items-center justify-center text-xl"
               >
                 üñ®Ô∏è
@@ -414,7 +423,7 @@ export default function SalesView({ activeSession }) { // <-- Recibimos la sesi√
                 onClick={() => confirmSale(paymentMethod)}
                 className="flex-[2] py-4 bg-orange-500 text-white rounded-2xl font-black text-xl uppercase shadow-lg shadow-orange-900/20 disabled:opacity-50 disabled:grayscale"
               >
-                Finalizar Venta
+                Finalizar Venta 
               </button>
             </div>
           </div>

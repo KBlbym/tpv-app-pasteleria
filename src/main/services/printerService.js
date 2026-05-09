@@ -1,19 +1,24 @@
 import escpos from 'escpos';
-import USB from 'escpos-usb';
+import useUSB from 'escpos-usb';
+escpos.USB = useUSB;
 import { getSettings } from './database.js';
 
 // Función genérica para abrir conexión y ejecutar un diseño
 const executePrint = (printJob) => {
   const settings = getSettings();
   try {
-    const device = new USB();
-    const printer = new escpos.Printer(device);
+    // 1. Buscamos la impresora
+    const device = new escpos.USB();
+    // 2. IMPORTANTE: Definir el encoding global como 'CP850'
+    const options = { encoding: "CP858" };
+    const printer = new escpos.Printer(device, options);
 
     device.open((error) => {
       if (error) {
         console.error("Error de impresora:", error);
         return;
       }
+
       // Ejecutamos el diseño específico
       printJob(printer, settings);
 
@@ -31,21 +36,22 @@ export function printSaleTicket(saleData) {
       .align('ct').style('b').size(1, 1).text(settings.business_name)
       .style('normal').size(0, 0)
       .text(settings.business_address)
+      .text(`test`)
       .text(`NIF: ${settings.business_nif}`)
-      .text('--------------------------------')
+      .text('-----------------------------------')
       .align('lt')
       .text(`TICKET: ${String(saleData.id || 'N/A').padStart(5, '0')}`)
       .text(`FECHA: ${new Date().toLocaleString()}`)
-      .text('--------------------------------');
+      .text('------------------------------------------------');
 
     saleData.cart.forEach(item => {
-      const line = `${item.qty} ${item.name.substring(0, 18)}`;
+      const line = `${item.qty} ${item.name.substring(0, 24)}`;
       const price = `${(item.qty * item.price).toFixed(2)}€`;
-      printer.text(line.padEnd(24) + price.padStart(8));
+      printer.text(line.padEnd(32) + price.padStart(12));
     });
 
     printer
-      .text('--------------------------------')
+      .text('------------------------------------------------')
       .align('rt').style('b').size(1, 1)
       .text(`TOTAL: ${saleData.total.toFixed(2)}€`)
       .text(`PAGO:  ${saleData.payment_method === 'CASH' ? 'EFECTIVO' : 'TARJETA'}`)
@@ -69,7 +75,7 @@ export function printReportX(data) {
     printer
       .align('ct').style('b').text("ARQUEO DE CAJA (X)")
       .style('normal').text(settings.business_name)
-      .text('--------------------------------')
+      .text('------------------------------------------------')
       .align('lt')
       .text(`EMPLEADO: ${data.user_name}`)
       .text(`INICIO:   ${data.start_time}`)
