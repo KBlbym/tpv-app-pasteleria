@@ -22,7 +22,6 @@ import {
 
 
 } from './services/database.js';
-import { printTicket } from './services/printer.js';
 import { printSaleTicket, printReportX, printReportZ } from './services/printerService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -145,7 +144,6 @@ ipcMain.handle('db:get-active-categories', async () => {
 });
 //#endregion
 // 2. Guardar venta e imprimir
-// src/main/main.js
 ipcMain.handle('db:save-sale', async (event, saleData) => {
   let savedId = null;
 
@@ -156,13 +154,6 @@ ipcMain.handle('db:save-sale', async (event, saleData) => {
   } catch (dbError) {
     console.error("Error en DB:", dbError);
     return { success: false, error: "Error al guardar en base de datos" };
-  }
-
-  // 2. Intento de impresión (Si falla, no pasa nada, seguimos adelante)
-  try {
-    await printTicket(saleData);
-  } catch (printError) {
-    console.log("Impresora no detectada (Modo simulación)");
   }
 
   // 3. RETORNO FINAL: Siempre devolvemos éxito si la DB funcionó
@@ -207,57 +198,6 @@ ipcMain.handle('db:toggle-product', async (event, { id, status }) => {
   return toggleProductStatus(id, status);
 });
 
-// 5. Test de impresora
-ipcMain.handle('print:test', async () => {
-  try {
-    const mockData = {
-      saleId: 'TEST-INIT',
-      total: 0,
-      cart: [{ qty: 1, name: 'CONCORD CP-450 READY', price: 0 }]
-    };
-    printTicket(mockData);
-    return { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
-// main.js (Dentro de tu handler de impresión)
-ipcMain.handle('print:ticket', async (event, data) => {
-  if (data.type === 'REPORT') {
-    let ticketContent = `
-      ${data.title}
-      Fecha: ${data.date}
-      --------------------------------
-      TOTAL VENTAS:    ${data.total.toFixed(2)}€
-      --------------------------------
-      METODOS DE PAGO:
-      Efectivo:        ${data.cash.toFixed(2)}€
-      Tarjeta:         ${data.card.toFixed(2)}€
-      Gastos:         -${data.expenses.toFixed(2)}€
-      
-      VENTAS POR EMPLEADO:
-    `;
-
-    // Iteramos por cada empleado para el ticket físico
-    data.employees.forEach(emp => {
-      ticketContent += `
-      👤 ${emp.name.toUpperCase()}
-      - Efectivo:      ${emp.cash.toFixed(2)}€
-      - Tarjeta:       ${emp.card.toFixed(2)}€
-      - Total:         ${emp.total.toFixed(2)}€
-      `;
-    });
-
-    ticketContent += `
-      --------------------------------
-      *** FIN DEL REPORTE ***
-    `;
-
-    // Aquí llamas a tu librería de impresión (pos-printer o similar)
-    // enviando 'ticketContent'
-  }
-});
 
 // 6. Manejador para obtener categorías (para el selector del formulario)
 ipcMain.handle('db:get-categories', async () => {
@@ -399,9 +339,22 @@ ipcMain.handle('db:get-past-z-report', async (event, date) => getPastZReport(dat
 //#endregion
 
 //#region  CONFIGURACIÓN DE IMPRESIÓN DESDE EL BACKEND (Fase 4)
-ipcMain.handle('print:sale', (event, data) => printSaleTicket(data));
-ipcMain.handle('print:reportX', (event, data) => printReportX(data));
-ipcMain.handle('print:reportZ', (event, data) => printReportZ(data));
+ipcMain.handle('print:sale', async (event, data) => {
+  try {
+    return printSaleTicket(data);
+  } catch (error) {
+    console.error("Error en print:sale:", error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('print:reportX', async (event, data) => {
+  return printReportX(data);
+});
+
+ipcMain.handle('print:reportZ', async (event, data) => {
+  return printReportZ(data);
+});
 
 //#endregion
 ipcMain.handle('db:register-expense', async (event, expenseData) => {

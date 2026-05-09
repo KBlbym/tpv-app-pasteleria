@@ -63,18 +63,23 @@ export default function CashView({ activeSession, onRefresh }) {
 
 
     const confirmZReport = async () => {
-        if (confirm("¿Estás seguro? Esto archivará todas las sesiones del día.")) {
-            try {
-                const idsToArchive = zReportPreview.sessions.map(s => s.id);
-                await window.electronAPI.archiveSessions(idsToArchive);
-                alert("✅ Jornada finalizada y archivada.");
-                setZReportPreview(null);
-                onRefresh();
-            } catch (err) {
-                alert("Error: " + err.message);
-            }
+    if (confirm("¿Estás seguro? Esto archivará todas las sesiones del día y se imprimirá el reporte Z.")) {
+        try {
+            // 1. Mandar a imprimir el reporte Z físico
+            await window.electronAPI.printReportZ(zReportPreview);
+
+            // 2. Archivar en la base de datos
+            const idsToArchive = zReportPreview.sessions.map(s => s.id);
+            await window.electronAPI.archiveSessions(idsToArchive);
+            
+            alert("✅ Jornada finalizada, impresa y archivada.");
+            setZReportPreview(null);
+            onRefresh();
+        } catch (err) {
+            alert("Error en proceso Z: " + err.message);
         }
-    };
+    }
+};
 
 
     const handleOpen = async () => {
@@ -349,7 +354,7 @@ export default function CashView({ activeSession, onRefresh }) {
                             <div className="space-y-2">
                                 <p className="text-[10px] font-bold text-slate-400 uppercase border-b pb-1">Turnos Incluidos:</p>
                                 {(zReportPreview.sessions || []).map(s => (
-                                    
+
                                     <div key={s.id} className="flex justify-between text-[11px] text-slate-600 py-1">
                                         <span className="uppercase font-semibold">{s.user_name}</span>
                                         <div className="flex items-center gap-2">
@@ -460,7 +465,17 @@ export default function CashView({ activeSession, onRefresh }) {
                         </div>
                         {/* ... botones ... */}
                         <div className="p-4 bg-slate-50 flex flex-col gap-2">
-                            <button onClick={() => { setXReportPreview(null); onRefresh(); }} className="w-full py-4 bg-slate-900 text-white rounded-xl font-black uppercase text-xs tracking-widest">
+                            <button onClick={async () => {
+                                try {
+                                    // Llamamos a la impresora con los datos del reporte actual
+                                    await window.electronAPI.printReportX(xReportPreview);
+                                } catch (error) {
+                                    console.error("Error al imprimir reporte X:", error);
+                                    alert("No se pudo imprimir, pero el turno se cerró correctamente.");
+                                }
+                                setXReportPreview(null);
+                                onRefresh();
+                            }} className="w-full py-4 bg-slate-900 text-white rounded-xl font-black uppercase text-xs tracking-widest">
                                 🖨️ IMPRIMIR Y FINALIZAR
                             </button>
                         </div>
