@@ -25,7 +25,6 @@ export default function HistorySection() {
     const loadSummary = async () => {
       const summary = await window.electronAPI.getBusinessSummary(); // Añade este canal al preload
       setBusinessSummary(summary);
-      console.log("summary:", businessSummary); // Log para verificar la estructura de los datos
     };
     loadSummary();
   }, [sales]); // Se actualiza cuando cambian las ventas
@@ -43,7 +42,6 @@ export default function HistorySection() {
   const openPreview = (title, data) => {
     if (!data || !data.details) return;
 
-    console.log("Datos recibidos para el reporte:", data); // Log para verificar la estructura de los datos
 
     const { details } = data;
 
@@ -102,35 +100,65 @@ export default function HistorySection() {
   };
 
   const handleReprint = async () => {
-    if (!selectedSale) return;
-    const printData = {
-      total: selectedSale.total,
-      cart: items.map(item => ({
-        name: item.name,
-        price: item.price,
-        qty: item.qty
-      }))
-    };
-    await window.electronAPI.printTicket(printData);
-    alert("Re-impresión enviada a la impresora.");
+  if (!selectedSale || !items.length) return;
+
+  const printData = {
+    // Datos básicos
+    total: selectedSale.total || 0,
+    payment_method: selectedSale.payment_method || 'CASH',
+    
+    cashReceived: selectedSale.cash_received || selectedSale.total,
+    change: selectedSale.cash_change || 0,
+    
+    // Mapeo de artículos
+    cart: items.map(item => ({
+      name: item.name,
+      price: Number(item.price) || 0,
+      qty: Number(item.qty) || 0
+    })),
+    
+    // Metadatos
+    date: selectedSale.date,
+    id: selectedSale.id,
+    session_id: selectedSale.session_id,
+    session_user: selectedSale.session_user,
+    isReprint: true 
   };
+
+  try {
+    await window.electronAPI.printSale(printData);
+    alert("Re-impresión enviada.");
+  } catch (error) {
+    console.error("Error detallado:", error);
+    alert("Error de impresora. Revisa la consola.");
+  }
+};
 
   const handlePrintReport = async () => {
     if (!selectedReport) return;
 
-    // Enviamos todos los datos del modal a la impresora
-    await window.electronAPI.printTicket({
-      type: 'REPORT',
-      title: selectedReport.title,
+    // Preparamos los datos para que coincidan exactamente con la estructura de printReportZ
+    const printData = {
       date: selectedReport.date,
-      total: selectedReport.total_sales,
-      cash: selectedReport.totals_by_method.CASH,
-      card: selectedReport.totals_by_method.CARD,
-      expenses: selectedReport.expenses,
-      employees: selectedReport.employees // Aquí va el array con cash/card por persona
-    });
+      total_sales: selectedReport.total_sales,
+      sales_count: sales.length, // Opcional: total de tickets en el rango actual
+      totals_by_method: selectedReport.totals_by_method,
+      total_expenses: selectedReport.expenses,
+      expenses: [], // Aquí podrías pasar el desglose si lo tienes, o dejarlo vacío
+      // Reutilizamos el campo 'sessions' para mostrar los empleados en el ticket
+      sessions: selectedReport.employees.map(emp => ({
+        user_name: emp.name,
+        net_cash: emp.total // El diseño del reporte Z usa net_cash para el monto
+      }))
+    };
 
-    alert("Reporte enviado a la impresora.");
+    try {
+      await window.electronAPI.printReportZ(printData);
+      alert("Reporte enviado a la impresora.");
+    } catch (error) {
+      console.error("Error al imprimir:", error);
+      alert("Error de conexión con la impresora.");
+    }
   };
   const totalSales = sales.reduce((acc, sale) => acc + sale.total, 0);
   const sections = [
@@ -174,7 +202,7 @@ export default function HistorySection() {
               </div>
 
               <button
-                onClick={() => openPreview(section.title, section.data)} // <--- Cambiado de handlePrint a openPreview
+                onClick={() => openPreview(section.title, section.data)}
                 className="w-full py-3 bg-slate-900 text-white rounded-2xl flex items-center justify-center gap-2 hover:bg-orange-500 transition-colors font-bold text-xs"
               >
                 📊 VER REPORTE
@@ -183,25 +211,7 @@ export default function HistorySection() {
           ))}
         </div>
       </div>
-      {/* --- RESUMEN DE RENDIMIENTO EMPRESARIAL --- */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-        {[
-          { label: 'Ventas Hoy', value: businessSummary.today, color: 'text-orange-600', icon: '☀️' },
-          { label: 'Últimos 7 Días', value: businessSummary.weekly, color: 'text-blue-600', icon: '📅' },
-          { label: 'Mes Actual', value: businessSummary.monthly, color: 'text-emerald-600', icon: '📊' },
-          { label: 'Ticket Promedio', value: businessSummary.avgTicket, color: 'text-purple-600', icon: '🎫' },
-        ].map((box, i) => (
-          <div key={i} className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
-            <div className="flex justify-between items-start">
-              <span className="text-xl">{box.icon}</span>
-              <span className={`text-lg font-black ${box.color}`}>
-                {Number(box.value).toFixed(2)}€
-              </span>
-            </div>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">{box.label}</p>
-          </div>
-        ))}
-      </div>
+
       {/* --- SECCIÓN 1: INSIGHTS DE NEGOCIO --- */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <div className="bg-gradient-to-br from-orange-500 to-orange-600 p-8 rounded-[2.5rem] text-white shadow-xl shadow-orange-100">
@@ -357,8 +367,6 @@ export default function HistorySection() {
 
           </div>
         </div>
-
-        {/* PANEL DE DETALLE (TICKET) */}
 
         {/* PANEL DE DETALLE (TICKET) */}
         <div className="lg:col-span-2">

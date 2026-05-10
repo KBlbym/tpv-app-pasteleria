@@ -18,7 +18,7 @@ const executePrint = (printJob) => {
         console.error("Error de impresora:", error);
         return;
       }
-
+      printer.buffer.write('\x1b\x74\x13');
       // Ejecutamos el diseño específico
       printJob(printer, settings);
 
@@ -36,7 +36,6 @@ export function printSaleTicket(saleData) {
       .align('ct').style('b').size(1, 1).text(settings.business_name)
       .style('normal').size(0, 0)
       .text(settings.business_address)
-      .text(`test`)
       .text(`NIF: ${settings.business_nif}`)
       .text('-----------------------------------')
       .align('lt')
@@ -60,11 +59,11 @@ export function printSaleTicket(saleData) {
       printer
         .text(`ENTREGADO: ${saleData.cashReceived.toFixed(2)}€`)
         .style('b')
-        .text(`CAMBIO:    ${saleData.change.toFixed(2)}€`)
+        .text(`CAMBIO:    ${(saleData.change || 0).toFixed(2)}€`)
         .style('normal');
     }
     printer
-      .feed(1).align('ct').style('normal').size(0, 0)
+      .feed(1).align('ct').style('normal').size(0, 0).text(`atendido por: ${saleData.session_user || 'N/A'}`)
       .text(settings.ticket_footer || 'Gracias por su visita');
   });
 }
@@ -72,24 +71,41 @@ export function printSaleTicket(saleData) {
 // --- DISEÑO: REPORTE X (Turno) ---
 export function printReportX(data) {
   executePrint((printer, settings) => {
+    const diferencia = data.closing_cash - data.expected_cash;
+
     printer
-      .align('ct').style('b').text("ARQUEO DE CAJA (X)")
-      .style('normal').text(settings.business_name)
-      .text('------------------------------------------------')
-      .align('lt')
-      .text(`EMPLEADO: ${data.user_name}`)
-      .text(`INICIO:   ${data.start_time}`)
-      .text(`FIN:      ${new Date().toLocaleTimeString()}`)
+      .align('ct').style('b').size(1, 1).text("ARQUEO DE TURNO (X)")
+      .size(0, 0).style('normal').text(`ID SESION: ${data.id}`)
       .text('--------------------------------')
-      .text(`FONDO INICIAL:  ${data.initial_cash.toFixed(2)}€`)
-      .text(`VENTAS TURNO:   ${data.total_sales.toFixed(2)}€`)
-      .text(`ESPERADO:       ${data.expected_cash.toFixed(2)}€`)
-      .style('b')
-      .text(`CONTADO:        ${data.closing_cash.toFixed(2)}€`)
-      .text(`DIFERENCIA:     ${(data.closing_cash - data.expected_cash).toFixed(2)}€`)
+      .align('lt')
+      .style('b').text(`EMPLEADO: ${data.user_name.toUpperCase()}`).style('normal')
+      .text(`INICIO: ${data.start_time}`)
+      .text(`FIN:    ${new Date().toLocaleTimeString()}`)
+      .text('--------------------------------')
+      .text(`FONDO INICIAL:     ${data.initial_cash.toFixed(2)}€`)
+      .style('b').text(`TOTAL VENTAS:      ${data.total_sales.toFixed(2)}€`).style('normal');
+
+    // Sección de Gastos
+    if (data.total_expenses > 0) {
+      printer.text('--------------------------------')
+        .text('GASTOS PAGADOS:')
+      data.expenses.forEach(exp => {
+        printer.text(`- ${exp.description.substring(0, 15).padEnd(16)} -${exp.amount.toFixed(2)}€`);
+      });
+      printer.style('b').text(`TOTAL GASTOS:     -${data.total_expenses.toFixed(2)}€`).style('normal');
+    }
+
+    printer.text('--------------------------------')
+      .text('VENTAS POR METODO:')
+      .text(`Efectivo:          ${(data.totals_by_method?.CASH || 0).toFixed(2)}€`)
+      .text(`Tarjeta:           ${(data.totals_by_method?.CARD || 0).toFixed(2)}€`)
+      .text('--------------------------------')
+      .text(`ESPERADO CAJA:     ${data.expected_cash.toFixed(2)}€`)
+      .style('b').size(1, 1).text(`CONTADO:  ${data.closing_cash.toFixed(2)}€`)
+      .size(0, 0).text(`DIFERENCIA: ${diferencia.toFixed(2)}€`)
       .style('normal')
       .text('--------------------------------')
-      .align('ct').text("COMPROBANTE DE EMPLEADO");
+      .align('ct').text("COMPROBANTE DE TURNO");
   });
 }
 
@@ -98,20 +114,40 @@ export function printReportZ(data) {
   executePrint((printer, settings) => {
     printer
       .align('ct').style('b').size(1, 1).text("CIERRE DE JORNADA (Z)")
-      .size(0, 0).text(data.date || new Date().toLocaleDateString())
+      .size(0, 0).text(data.date ? new Date(data.date).toLocaleString() : new Date().toLocaleString())
       .text('--------------------------------')
       .align('lt')
-      .text(`TOTAL VENTAS Z: ${data.total_sales.toFixed(2)}€`)
-      .text(`TOTAL TICKETS:  ${data.sales_count}`)
+      .style('b').size(1, 1).text(`TOTAL VENTAS:  ${data.total_sales.toFixed(2)}€`)
+      .size(0, 0).style('normal').text(`OPERACIONES:   ${data.sales_count} tickets`)
+      .text('--------------------------------');
+
+    // Gastos de la jornada
+    if (data.total_expenses > 0) {
+      printer.text("GASTOS DE LA JORNADA:");
+      data.expenses.forEach(exp => {
+        printer.text(`- ${exp.description.substring(0, 15).padEnd(16)} -${exp.amount.toFixed(2)}€`);
+      });
+      printer.text(`TOTAL GASTOS:     -${data.total_expenses.toFixed(2)}€`);
+
+      const netoEfectivo = (data.totals_by_method?.CASH || 0) - (data.total_expenses || 0);
+      printer.style('b').text(`NETO EFECTIVO:    ${netoEfectivo.toFixed(2)}€`).style('normal')
+        .text('--------------------------------');
+    }
+
+    // Desglose por método
+    printer.text("VENTAS POR METODO:")
+      .text(`Efectivo:          ${(data.totals_by_method?.CASH || 0).toFixed(2)}€`)
+      .text(`Tarjeta:           ${(data.totals_by_method?.CARD || 0).toFixed(2)}€`)
       .text('--------------------------------')
-      .text("DESGLOSE POR TURNOS:");
+      .text("TURNOS INCLUIDOS:");
 
     data.sessions.forEach(s => {
-      printer.text(`${s.user_name.substring(0, 15).padEnd(16)} | ${s.closing_cash.toFixed(2)}€`);
+      const nombre = s.user_name.toUpperCase().substring(0, 12).padEnd(13);
+      printer.text(`${nombre} | Ventas: ${Number(s.net_cash || 0).toFixed(2)}€`);
     });
 
     printer
       .text('--------------------------------')
-      .align('ct').text("*** FIN DEL REPORTE Z ***");
+      .align('ct').style('italic').text("*** FIN DE JORNADA LABORAL ***");
   });
 }

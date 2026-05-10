@@ -80,6 +80,7 @@ export default function SalesView({ activeSession }) { // <-- Recibimos la sesiÃ
       cart: [...cart],
       total,
       session_id: activeSession.id,
+      session_user: activeSession.user_name, // <-- Agregamos el nombre del usuario de la sesiÃ³n
       payment_method: method, // 'CASH' o 'CARD'
       date: new Date().toISOString(),
       cashReceived: method === 'CASH' ? cashReceived : total,
@@ -87,7 +88,6 @@ export default function SalesView({ activeSession }) { // <-- Recibimos la sesiÃ
     };
 
     try {
-      console.log("Datos de la venta a guardar e imprimir:", saleData);
       const res = await window.electronAPI.saveSale(saleData);
       if (res?.success) {
         setLastSale({
