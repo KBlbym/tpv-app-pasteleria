@@ -8,20 +8,22 @@ const db = new Database(dbPath);
 
 export function initDB() {
   db.pragma('journal_mode = WAL');
-  // Tabla de Categorías
+
+  // 1. Tabla de Categorías
   db.exec(`CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE,
-    icon TEXT 
+    icon TEXT,
+    image_path TEXT
   )`);
 
-  // Tabla de configuración
+  // 2. Tabla de configuración
   db.exec(`CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT
   )`);
 
-  // Tabla de Productos
+  // 3. Tabla de Productos
   db.exec(`CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
@@ -32,94 +34,53 @@ export function initDB() {
     FOREIGN KEY(category_id) REFERENCES categories(id)
   )`);
 
+  // 4. Tabla de Sesiones de Caja (Se crea antes que sales porque sales la referencia)
+  db.exec(`CREATE TABLE IF NOT EXISTS cash_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_name TEXT NOT NULL,
+    start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    end_time DATETIME,
+    initial_cash REAL NOT NULL,
+    closing_cash REAL,
+    status TEXT DEFAULT 'OPEN'
+  )`);
 
-
-  // Tabla de Ventas (CORREGIDA: Ahora incluye session_id desde el inicio)
+  // 5. Tabla de Ventas (Incluye ya todos los campos de pago y sesión)
   db.exec(`CREATE TABLE IF NOT EXISTS sales (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     total REAL,
+    payment_method TEXT DEFAULT 'CASH',
+    cash_received REAL DEFAULT 0,
+    cash_change REAL DEFAULT 0,
     session_id INTEGER,
     date DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(session_id) REFERENCES cash_sessions(id)
   )`);
 
-  // Tabla de Líneas de Venta
+  // 6. Tabla de Líneas de Venta (Incluye el nombre del producto para históricos)
   db.exec(`CREATE TABLE IF NOT EXISTS sale_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     sale_id INTEGER,
     product_id INTEGER,
+    name TEXT, 
     qty REAL,
     price REAL,
     FOREIGN KEY(sale_id) REFERENCES sales(id)
   )`);
 
-  // Tabla de Sesiones de Caja
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS cash_sessions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_name TEXT NOT NULL,
-      start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-      end_time DATETIME,
-      initial_cash REAL NOT NULL,
-      closing_cash REAL,
-      status TEXT DEFAULT 'OPEN'
-    )
-  `);
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS cash_expenses (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id INTEGER,
-        amount REAL NOT NULL,
-        description TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (session_id) REFERENCES cash_sessions(id)
-    )
-`);
-  // Mantenimiento de columnas para DBs ya existentes
-  try {
-    db.prepare("ALTER TABLE products ADD COLUMN image_path TEXT").run();
-    db.prepare("ALTER TABLE categories ADD COLUMN image_path TEXT").run();
-    db.prepare("ALTER TABLE sales ADD COLUMN session_id INTEGER").run();
-  } catch (e) { }
+  // 7. Tabla de Gastos
+  db.exec(`CREATE TABLE IF NOT EXISTS cash_expenses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER,
+    amount REAL NOT NULL,
+    description TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES cash_sessions(id)
+  )`);
 
-  try {
-    db.prepare(`ALTER TABLE sales ADD COLUMN payment_method TEXT DEFAULT 'CASH'`).run();
-    console.log("Columna payment_method añadida con éxito.");
-  } catch (err) {
-    if (err.message.includes("duplicate column name")) {
-      // La columna ya existía, no hacemos nada
-    } else {
-      console.error("Error al actualizar tabla sales:", err);
-    }
-  }
+  // --- SEMBRADO DE DATOS INICIALES ---
 
-
-
-
-  try {
-    db.prepare(`UPDATE sales SET payment_method = 'CASH' WHERE payment_method IS NULL`).run();
-    console.log("Columna payment_method actualizada con éxito.");
-  } catch (err) {
-    if (err.message.includes("duplicate column payment_method")) {
-      // La columna ya existía, no hacemos nada
-    } else {
-      console.error("Error al actualizar tabla sales:", err);
-    }
-  }
-
-
-  try {
-    db.prepare(`ALTER TABLE sale_items ADD COLUMN name TEXT DEFAULT 'CASH'`).run();
-    console.log("Columna name añadida con éxito.");
-  } catch (err) {
-    if (err.message.includes("duplicate column name")) {
-      // La columna ya existía, no hacemos nada
-    } else {
-      console.error("Error al actualizar tabla sale_items:", err);
-    }
-  }
-
-  // Sembrado de datos (Categorías)
+  // Categorías
   const countCategories = db.prepare('SELECT COUNT(*) as total FROM categories').get();
   if (countCategories.total === 0) {
     const insertCat = db.prepare('INSERT INTO categories (name, icon) VALUES (?, ?)');
@@ -129,7 +90,7 @@ export function initDB() {
     insertCat.run('Cafetería', '☕');
   }
 
-  // Sembrado de datos (Productos)
+  // Productos
   const countProducts = db.prepare('SELECT COUNT(*) as count FROM products').get();
   if (countProducts.count === 0) {
     const insert = db.prepare('INSERT INTO products (name, price, category_id) VALUES (?, ?, ?)');
@@ -139,7 +100,7 @@ export function initDB() {
     insert.run('Café con Leche', 1.40, 4);
   }
 
-  // Sembrado de datos (Settings)
+  // Configuración
   const countSettings = db.prepare('SELECT COUNT(*) as total FROM settings').get();
   if (countSettings.total === 0) {
     const insert = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)');
@@ -151,71 +112,71 @@ export function initDB() {
   }
 }
 
-// Sembrado de datos (Ventas de los últimos 15 días)
-const countSales = db.prepare('SELECT COUNT(*) as total FROM sales').get();
+// // Sembrado de datos (Ventas de los últimos 15 días)
+// const countSales = db.prepare('SELECT COUNT(*) as total FROM sales').get();
 
-if (countSales.total === 0) {
-  console.log("Sembrando historial de ventas de 15 días...");
+// if (countSales.total === 0) {
+//   console.log("Sembrando historial de ventas de 15 días...");
 
-  const insertSale = db.prepare(`
-    INSERT INTO sales (total, session_id, payment_method, date) 
-    VALUES (?, ?, ?, ?)
-  `);
+//   const insertSale = db.prepare(`
+//     INSERT INTO sales (total, session_id, payment_method, date) 
+//     VALUES (?, ?, ?, ?)
+//   `);
 
-  const insertItem = db.prepare(`
-    INSERT INTO sale_items (sale_id, product_id, name, qty, price) 
-    VALUES (?, ?, ?, ?, ?)
-  `);
+//   const insertItem = db.prepare(`
+//     INSERT INTO sale_items (sale_id, product_id, name, qty, price) 
+//     VALUES (?, ?, ?, ?, ?)
+//   `);
 
-  // 1. Creamos una sesión de prueba para asociar las ventas
-  const session = db.prepare(`
-    INSERT INTO cash_sessions (user_name, initial_cash, status, start_time) 
-    VALUES (?, ?, ?, ?)
-  `).run('Admin Sistema', 100, 'CLOSED', '2024-01-01 08:00:00');
+//   // 1. Creamos una sesión de prueba para asociar las ventas
+//   const session = db.prepare(`
+//     INSERT INTO cash_sessions (user_name, initial_cash, status, start_time) 
+//     VALUES (?, ?, ?, ?)
+//   `).run('Admin Sistema', 100, 'CLOSED', '2024-01-01 08:00:00');
 
-  const sessionId = session.lastInsertRowid;
+//   const sessionId = session.lastInsertRowid;
 
-  // Productos de referencia para las líneas de venta
-  const mockProducts = [
-    { id: 1, name: 'Barra de Pan', price: 1.10 },
-    { id: 2, name: 'Croissant Classic', price: 1.50 },
-    { id: 3, name: 'Ensaimada', price: 2.20 },
-    { id: 4, name: 'Café Latte', price: 1.80 }
-  ];
+//   // Productos de referencia para las líneas de venta
+//   const mockProducts = [
+//     { id: 1, name: 'Barra de Pan', price: 1.10 },
+//     { id: 2, name: 'Croissant Classic', price: 1.50 },
+//     { id: 3, name: 'Ensaimada', price: 2.20 },
+//     { id: 4, name: 'Café Latte', price: 1.80 }
+//   ];
 
-  // 2. Bucle para recorrer los últimos 15 días
-  for (let i = 1; i <= 15; i++) {
-    const date = new Date();
-    date.setDate(date.getDate() - i);
+//   // 2. Bucle para recorrer los últimos 15 días
+//   for (let i = 1; i <= 15; i++) {
+//     const date = new Date();
+//     date.setDate(date.getDate() - i);
 
-    // Generamos entre 5 y 10 ventas aleatorias por cada día
-    const salesPerDay = Math.floor(Math.random() * (10 - 5 + 1)) + 5;
+//     // Generamos entre 5 y 10 ventas aleatorias por cada día
+//     const salesPerDay = Math.floor(Math.random() * (10 - 5 + 1)) + 5;
 
-    for (let j = 0; j < salesPerDay; j++) {
-      // Creamos una hora aleatoria para cada venta (entre las 08:00 y las 20:00)
-      const randomHour = Math.floor(Math.random() * (20 - 8 + 1)) + 8;
-      const randomMin = Math.floor(Math.random() * 60);
-      date.setHours(randomHour, randomMin, 0);
+//     for (let j = 0; j < salesPerDay; j++) {
+//       // Creamos una hora aleatoria para cada venta (entre las 08:00 y las 20:00)
+//       const randomHour = Math.floor(Math.random() * (20 - 8 + 1)) + 8;
+//       const randomMin = Math.floor(Math.random() * 60);
+//       date.setHours(randomHour, randomMin, 0);
 
-      const dateStr = date.toISOString().slice(0, 19).replace('T', ' ');
+//       const dateStr = date.toISOString().slice(0, 19).replace('T', ' ');
 
-      // Elegimos productos aleatorios para esta venta
-      const p1 = mockProducts[Math.floor(Math.random() * mockProducts.length)];
-      const p2 = mockProducts[Math.floor(Math.random() * mockProducts.length)];
-      const totalVenta = p1.price + (p2.price * 2);
-      const metodo = Math.random() > 0.5 ? 'CARD' : 'CASH';
+//       // Elegimos productos aleatorios para esta venta
+//       const p1 = mockProducts[Math.floor(Math.random() * mockProducts.length)];
+//       const p2 = mockProducts[Math.floor(Math.random() * mockProducts.length)];
+//       const totalVenta = p1.price + (p2.price * 2);
+//       const metodo = Math.random() > 0.5 ? 'CARD' : 'CASH';
 
-      // 3. Insertar Venta
-      const info = insertSale.run(totalVenta, sessionId, metodo, dateStr);
-      const saleId = info.lastInsertRowid;
+//       // 3. Insertar Venta
+//       const info = insertSale.run(totalVenta, sessionId, metodo, dateStr);
+//       const saleId = info.lastInsertRowid;
 
-      // 4. Insertar Líneas de Venta
-      insertItem.run(saleId, p1.id, p1.name, 1, p1.price);
-      insertItem.run(saleId, p2.id, p2.name, 2, p2.price);
-    }
-  }
-  console.log("✔ ¡Éxito! 15 días de historial generados.");
-}
+//       // 4. Insertar Líneas de Venta
+//       insertItem.run(saleId, p1.id, p1.name, 1, p1.price);
+//       insertItem.run(saleId, p2.id, p2.name, 2, p2.price);
+//     }
+//   }
+//   console.log("✔ ¡Éxito! 15 días de historial generados.");
+// }
 
 // --- CATEGORÍAS ---
 export function addCategory(cat) {

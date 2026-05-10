@@ -18,7 +18,7 @@ const executePrint = (printJob) => {
         console.error("Error de impresora:", error);
         return;
       }
-
+      printer.buffer.write('\x1b\x74\x13');
       // Ejecutamos el diseño específico
       printJob(printer, settings);
 
@@ -36,7 +36,6 @@ export function printSaleTicket(saleData) {
       .align('ct').style('b').size(1, 1).text(settings.business_name)
       .style('normal').size(0, 0)
       .text(settings.business_address)
-      .text(`test`)
       .text(`NIF: ${settings.business_nif}`)
       .text('-----------------------------------')
       .align('lt')
@@ -60,11 +59,11 @@ export function printSaleTicket(saleData) {
       printer
         .text(`ENTREGADO: ${saleData.cashReceived.toFixed(2)}€`)
         .style('b')
-        .text(`CAMBIO:    ${saleData.change.toFixed(2)}€`)
+        .text(`CAMBIO:    ${(saleData.change || 0).toFixed(2)}€`)
         .style('normal');
     }
     printer
-      .feed(1).align('ct').style('normal').size(0, 0)
+      .feed(1).align('ct').style('normal').size(0, 0).text(`atendido por: ${saleData.session_user || 'N/A'}`)
       .text(settings.ticket_footer || 'Gracias por su visita');
   });
 }
@@ -129,10 +128,10 @@ export function printReportZ(data) {
         printer.text(`- ${exp.description.substring(0, 15).padEnd(16)} -${exp.amount.toFixed(2)}€`);
       });
       printer.text(`TOTAL GASTOS:     -${data.total_expenses.toFixed(2)}€`);
-      
+
       const netoEfectivo = (data.totals_by_method?.CASH || 0) - (data.total_expenses || 0);
       printer.style('b').text(`NETO EFECTIVO:    ${netoEfectivo.toFixed(2)}€`).style('normal')
-             .text('--------------------------------');
+        .text('--------------------------------');
     }
 
     // Desglose por método

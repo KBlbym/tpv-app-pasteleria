@@ -25,7 +25,6 @@ export default function HistorySection() {
     const loadSummary = async () => {
       const summary = await window.electronAPI.getBusinessSummary(); // Añade este canal al preload
       setBusinessSummary(summary);
-      console.log("summary:", businessSummary); // Log para verificar la estructura de los datos
     };
     loadSummary();
   }, [sales]); // Se actualiza cuando cambian las ventas
@@ -43,7 +42,6 @@ export default function HistorySection() {
   const openPreview = (title, data) => {
     if (!data || !data.details) return;
 
-    console.log("Datos recibidos para el reporte:", data); // Log para verificar la estructura de los datos
 
     const { details } = data;
 
@@ -102,18 +100,39 @@ export default function HistorySection() {
   };
 
   const handleReprint = async () => {
-    if (!selectedSale) return;
-    const printData = {
-      total: selectedSale.total,
-      cart: items.map(item => ({
-        name: item.name,
-        price: item.price,
-        qty: item.qty
-      }))
-    };
-    await window.electronAPI.printSales(printData);
-    alert("Re-impresión enviada a la impresora.");
+  if (!selectedSale || !items.length) return;
+
+  const printData = {
+    // Datos básicos
+    total: selectedSale.total || 0,
+    payment_method: selectedSale.payment_method || 'CASH',
+    
+    cashReceived: selectedSale.cash_received || selectedSale.total,
+    change: selectedSale.cash_change || 0,
+    
+    // Mapeo de artículos
+    cart: items.map(item => ({
+      name: item.name,
+      price: Number(item.price) || 0,
+      qty: Number(item.qty) || 0
+    })),
+    
+    // Metadatos
+    date: selectedSale.date,
+    id: selectedSale.id,
+    session_id: selectedSale.session_id,
+    session_user: selectedSale.session_user,
+    isReprint: true 
   };
+
+  try {
+    await window.electronAPI.printSale(printData);
+    alert("Re-impresión enviada.");
+  } catch (error) {
+    console.error("Error detallado:", error);
+    alert("Error de impresora. Revisa la consola.");
+  }
+};
 
   const handlePrintReport = async () => {
     if (!selectedReport) return;
