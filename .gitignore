@@ -9,6 +9,9 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+release
+release/*
+build
 dist
 dist-ssr
 *.local
